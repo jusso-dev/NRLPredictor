@@ -11,6 +11,36 @@ Signal-driven NRL match and try-scorer prediction engine. Scrapes live data from
 ![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+## Screenshots
+
+### Dashboard — current round at a glance
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+### Match detail — per-team win signals + ranked try-scorer breakdown
+
+![Match detail](docs/screenshots/match-detail.png)
+
+### Multi-bet builder — combined probability across winner + try-scorer legs
+
+![Multi-bet](docs/screenshots/multi-bet.png)
+
+### Leaderboard — season-long try-scorer rankings
+
+![Leaderboard](docs/screenshots/leaderboard.png)
+
+### Accuracy — top-5 hit rate per round, drilling down to per-pick outcomes
+
+![Accuracy](docs/screenshots/accuracy.png)
+
+### How it works — signal weights and data sources, plain-language
+
+![Methodology](docs/screenshots/methodology.png)
+
+### Chat — conversational Claude analyst with tool access to scraped data
+
+![Chat](docs/screenshots/chat.png)
+
 ## Architecture
 
 ```
