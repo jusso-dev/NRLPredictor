@@ -64,6 +64,15 @@ return [
         // Phase 14: set-conversion efficiency (quality, not volume)
         'team_set_efficiency'        => 7,   // Team tries per completed set (last 5) — attack conversion quality
         'opp_set_concede_rate'       => 7,   // Tries conceded per opp-set-faced (last 5) — defensive resilience
+        // Phase 15: per-carry explosive-play quality
+        'team_explosive_rate'        => 8,   // (TB + LB + offloads) / runs — danger per carry
+        'opp_explosive_concede'      => 7,   // Opp explosive plays conceded per opp run (last 5)
+        // Phase 16: attacking-pressure indicators
+        'team_drop_outs_forced'      => 7,   // Goal-line repeat-set generation (last 5)
+        'opp_ruck_penalties'         => 5,   // Opp's rolling ruck infringements/game (last 5)
+        // Phase 17: penalty differential + opp effective-tackle %
+        'team_penalty_diff'          => 6,   // Net penalties drawn per game (last 5) — field position
+        'opp_effective_tackle_pct'   => 6,   // Lower opp effective-tackle % ⇒ more broken-line carries
     ],
 
     // ── Match-level signals (applied to all players) ─────
