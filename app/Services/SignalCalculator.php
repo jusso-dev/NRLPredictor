@@ -219,6 +219,25 @@ class SignalCalculator
         // retreats for attack = back-five getting clean front-foot ball.
         // Spread: ~1.9 (Sharks) → ~5.0 (Panthers). Maps [2.0, 5.0] → [0, 1].
         'opp_ruck_penalties'         => 5,
+        // Phase 17: field-position + defensive-efficiency signals.
+        // Net penalty differential per game (last 5) = opp_penalties_conceded
+        // − team_penalties_conceded. Positive = more penalties drawn than
+        // conceded ⇒ more attacking sets in opp half + better field position.
+        // Distinct from `opp_ruck_penalties` (opp ruck-only count) and
+        // `team_kick_pressure` (territory by boot). Captures own-side
+        // discipline edge. League spread typically -3.0 to +3.5 per game;
+        // maps [-1.5, +3.0] → [0, 1]. Position share: back-five and edges
+        // finish off short-field attacking sets.
+        'team_penalty_diff'          => 6,
+        // Opponent's rolling effective tackle % (last 5). Direct defensive
+        // efficiency measure — lower pct means more first-up busts and
+        // broken-line carries available for support runners. Orthogonal to
+        // missed_tackles (raw count) and post_contact_concede (yardage)
+        // because effective_tackle blends both contact failure and roll-off
+        // assists into a single % rating. League band 88–94%; maps
+        // (92 − pct)/6 ⇒ [0, 1]. Position share favours back-five who feast
+        // on broken tackles in space.
+        'opp_effective_tackle_pct'   => 6,
     ];
 
     public const POSITION_ADVANTAGE = [
@@ -319,6 +338,10 @@ class SignalCalculator
         // Phase 16: attacking-pressure indicators (drop-outs forced + opp ruck infringements)
         $signals[] = $this->teamDropOutsForced($player, $w);
         $signals[] = $this->oppRuckPenalties($player, $opponentId, $w);
+
+        // Phase 17: penalty differential (field position) + opp effective tackle %
+        $signals[] = $this->teamPenaltyDiff($player, $w);
+        $signals[] = $this->oppEffectiveTacklePct($player, $opponentId, $w);
 
         return array_values(array_filter($signals));
     }
@@ -2407,6 +2430,111 @@ class SignalCalculator
             'weight' => $weight,
             'strength' => $strength,
             'description' => sprintf('Opp concedes %.2f ruck infringements/game (last %d)', $avg, $rows->count()),
+        ];
+    }
+
+    /**
+     * Phase 17a: rolling net penalty differential per game (last 5). For each
+     * of the team's last 5 completed matches, compute (opp.penalties_conceded
+     * − team.penalties_conceded). Positive avg = field-position dominance via
+     * referee whistle ⇒ more attacking sets in opp half. Maps [-1.5, +3.0] → [0, 1].
+     */
+    protected function teamPenaltyDiff(Player $player, array $w): array
+    {
+        $weight = $w['team_penalty_diff'] ?? 6;
+        if (! $player->team_id) {
+            return ['type' => 'team_penalty_diff', 'weight' => $weight, 'strength' => 0.0, 'description' => 'Team unknown'];
+        }
+
+        $matchIds = Matchup::where('status', 'completed')
+            ->where(fn ($q) => $q->where('home_team_id', $player->team_id)->orWhere('away_team_id', $player->team_id))
+            ->orderByDesc('kickoff_at')
+            ->limit(5)
+            ->pluck('id');
+
+        if ($matchIds->isEmpty()) {
+            return ['type' => 'team_penalty_diff', 'weight' => $weight, 'strength' => 0.0, 'description' => 'No recent matches'];
+        }
+
+        $rows = MatchTeamStats::whereIn('match_id', $matchIds)
+            ->whereNotNull('penalties_conceded')
+            ->get(['match_id', 'team_id', 'penalties_conceded']);
+
+        $diffs = [];
+        foreach ($matchIds as $matchId) {
+            $pair = $rows->where('match_id', $matchId);
+            if ($pair->count() !== 2) {
+                continue;
+            }
+            $own = $pair->firstWhere('team_id', $player->team_id);
+            $opp = $pair->first(fn ($r) => $r->team_id !== $player->team_id);
+            if (! $own || ! $opp) {
+                continue;
+            }
+            $diffs[] = (int) $opp->penalties_conceded - (int) $own->penalties_conceded;
+        }
+
+        if (count($diffs) < 3) {
+            return ['type' => 'team_penalty_diff', 'weight' => $weight, 'strength' => 0.0, 'description' => 'Insufficient penalty history'];
+        }
+
+        $avg = array_sum($diffs) / count($diffs);
+        $base = max(0.0, min(1.0, ($avg + 1.5) / 4.5));
+        $share = match ($player->position) {
+            'winger', 'fullback', 'centre' => 1.00,
+            'second-row'                   => 0.70,
+            'five-eighth', 'halfback'      => 0.55,
+            'lock'                         => 0.35,
+            'hooker'                       => 0.30,
+            default                        => 0.20,
+        };
+        $strength = min(1.0, $base * $share);
+
+        return [
+            'type' => 'team_penalty_diff',
+            'weight' => $weight,
+            'strength' => $strength,
+            'description' => sprintf('Penalty diff %+.2f/game (last %d)', $avg, count($diffs)),
+        ];
+    }
+
+    /**
+     * Phase 17b: opponent's rolling effective tackle % (last 5). Lower pct =
+     * more busts + ineffective contact ⇒ more clean-line carries for support
+     * runners. Maps (92 − pct) / 6 ⇒ [0, 1] (so 92% → 0, 86% → 1).
+     */
+    protected function oppEffectiveTacklePct(Player $player, int $opponentId, array $w): array
+    {
+        $weight = $w['opp_effective_tackle_pct'] ?? 6;
+
+        $rows = MatchTeamStats::where('team_id', $opponentId)
+            ->whereHas('match', fn ($q) => $q->where('status', 'completed'))
+            ->whereNotNull('effective_tackle_pct')
+            ->orderByDesc('id')
+            ->limit(5)
+            ->get(['effective_tackle_pct']);
+
+        if ($rows->count() < 3) {
+            return ['type' => 'opp_effective_tackle_pct', 'weight' => $weight, 'strength' => 0.0, 'description' => 'Insufficient effective-tackle history'];
+        }
+
+        $avg = (float) $rows->avg(fn ($r) => (float) $r->effective_tackle_pct);
+        $base = max(0.0, min(1.0, (92.0 - $avg) / 6.0));
+        $share = match ($player->position) {
+            'winger', 'fullback', 'centre' => 1.00,
+            'second-row'                   => 0.75,
+            'five-eighth', 'halfback'      => 0.55,
+            'lock'                         => 0.40,
+            'hooker'                       => 0.35,
+            default                        => 0.25,
+        };
+        $strength = min(1.0, $base * $share);
+
+        return [
+            'type' => 'opp_effective_tackle_pct',
+            'weight' => $weight,
+            'strength' => $strength,
+            'description' => sprintf('Opp effective tackle %.1f%% (last %d)', $avg, $rows->count()),
         ];
     }
 }
