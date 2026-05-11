@@ -1,0 +1,135 @@
+@import url('https://fonts.bunny.net/css?family=barlow:400,500,600,700|barlow-condensed:500,600,700|jetbrains-mono:400,500');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    /* Light mode palette. Colors are RGB-space triplets so Tailwind's
+       <alpha-value> substitution works for classes like bg-ink-900/80. */
+    :root {
+        color-scheme: light;
+
+        --color-ink-950: 244 245 247;  /* page bg */
+        --color-ink-900: 255 255 255;  /* card bg */
+        --color-ink-800: 238 240 244;  /* hover surface */
+        --color-ink-700: 226 229 235;  /* divider */
+        --color-ink-600: 206 210 218;  /* border */
+
+        --color-paper-50:  244 245 247;
+        --color-paper-100: 238 240 244;
+        --color-paper-200: 226 229 235;
+        --color-paper-300: 206 210 218;
+        --color-paper-400: 173 179 191;
+
+        --color-bone-50:   10  18  42;   /* heading */
+        --color-bone-100:  26  39  68;   /* body strong */
+        --color-bone-200:  58  70 101;   /* body */
+        --color-bone-400: 107 116 143;   /* muted */
+        --color-bone-500: 145 153 178;   /* label */
+    }
+
+    .dark {
+        color-scheme: dark;
+
+        --color-ink-950:  10  10  10;   /* page bg, darker than header */
+        --color-ink-900:  20  20  20;   /* card bg */
+        --color-ink-800:  30  30  30;   /* hover */
+        --color-ink-700:  42  42  42;   /* divider */
+        --color-ink-600:  58  58  58;   /* border */
+
+        --color-paper-50:   20  20  20;
+        --color-paper-100:  30  30  30;
+        --color-paper-200:  42  42  42;
+        --color-paper-300:  58  58  58;
+        --color-paper-400:  95  95  95;
+
+        --color-bone-50:  244 245 247;   /* heading */
+        --color-bone-100: 224 226 231;   /* body strong */
+        --color-bone-200: 191 196 208;   /* body */
+        --color-bone-400: 138 143 158;   /* muted */
+        --color-bone-500:  95 100 117;   /* label */
+    }
+
+    html { background-color: rgb(var(--color-ink-950)); }
+
+    body {
+        @apply bg-ink-950 text-bone-100 font-sans antialiased;
+    }
+    body::before {
+        /* Soft top highlight, different intensity per mode. */
+        content: "";
+        position: fixed;
+        inset: 0 0 auto 0;
+        height: 220px;
+        pointer-events: none;
+        background: linear-gradient(180deg, rgba(255,255,255,0.6) 0%, transparent 100%);
+        z-index: -1;
+    }
+    .dark body::before {
+        background: linear-gradient(180deg, rgba(0,184,82,0.04) 0%, transparent 100%);
+    }
+
+    ::selection { @apply bg-gold-500/25 text-bone-50; }
+
+    h1, h2, h3, h4, h5, h6 { @apply text-bone-50; }
+}
+
+@layer components {
+    .card {
+        @apply rounded-lg border border-ink-600 bg-ink-900 shadow-card transition-colors;
+    }
+    .card-hover {
+        @apply hover:border-gold-500/50 hover:shadow-glow;
+    }
+
+    .chip {
+        @apply inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em];
+    }
+    .chip-red    { @apply bg-signal-red/10    text-signal-red    ring-1 ring-signal-red/25; }
+    .chip-orange { @apply bg-signal-orange/15 text-signal-orange ring-1 ring-signal-orange/30; }
+    .chip-yellow { @apply bg-signal-yellow/20 text-signal-yellow ring-1 ring-signal-yellow/45; }
+    .chip-green  { @apply bg-signal-green/15  text-signal-green  ring-1 ring-signal-green/30; }
+    .chip-blue   { @apply bg-signal-blue/15   text-signal-blue   ring-1 ring-signal-blue/30; }
+    .chip-purple { @apply bg-signal-purple/15 text-signal-purple ring-1 ring-signal-purple/30; }
+    .chip-gold   { @apply bg-gold-500/15      text-gold-600      ring-1 ring-gold-500/35; }
+    .chip-muted  { @apply bg-ink-800          text-bone-400      ring-1 ring-ink-600; }
+    .chip-navy   { @apply bg-navy-900         text-white; }
+    .dark .chip-gold { @apply text-gold-400; }
+
+    .h-display {
+        @apply font-display font-semibold uppercase tracking-tight;
+    }
+    .lbl {
+        @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-bone-400;
+    }
+
+    .btn-primary {
+        @apply inline-flex items-center justify-center rounded bg-navy-900 px-3.5 py-2 text-xs font-semibold uppercase tracking-wider text-white transition hover:bg-navy-700 disabled:opacity-50;
+    }
+    .dark .btn-primary { @apply bg-gold-500 text-navy-900 hover:bg-gold-400; }
+
+    .btn-accent {
+        @apply inline-flex items-center justify-center rounded bg-gold-500 px-3.5 py-2 text-xs font-semibold uppercase tracking-wider text-white transition hover:bg-gold-600 disabled:opacity-50;
+    }
+
+    .btn-ghost {
+        @apply inline-flex items-center justify-center rounded border border-ink-600 bg-ink-900 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-bone-100 transition hover:border-ink-600 hover:bg-ink-800;
+    }
+
+    .score-bar {
+        @apply relative h-2 w-full overflow-hidden rounded-full bg-ink-700;
+    }
+    .score-bar-fill {
+        @apply absolute inset-y-0 left-0 rounded-full;
+    }
+
+    .accent-bar {
+        @apply inline-block h-5 w-1 rounded-sm bg-gold-500 align-middle;
+    }
+
+    /* Inputs */
+    .input {
+        @apply w-full rounded border border-ink-600 bg-ink-900 px-3 py-2 text-sm text-bone-50 placeholder:text-bone-400 focus:border-gold-500 focus:outline-none focus:ring-2 focus:ring-gold-500/25;
+    }
+}

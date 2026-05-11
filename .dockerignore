@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+node_modules
+vendor
+storage/logs/*
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/framework/testing/*
+public/build
+database/database.sqlite
+python-agent
+docker-compose.yml
