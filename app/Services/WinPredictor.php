@@ -75,6 +75,11 @@ class WinPredictor
         // create more drop-outs than they concede control field position and
         // win at materially higher rate. League spread ~0.5–2.6 per game.
         'drop_out_diff'       => 7,
+        // Phase 18: net effective-tackle % advantage (last 5). First-contact
+        // defensive quality — distinct from raw missed-tackle counts (volume)
+        // and yardage_dominance (metres). League band 88–94%; even a 2pp gap
+        // is meaningful at scale across a match.
+        'tackle_efficiency_edge' => 8,
     ];
 
     public function weights(): array
@@ -275,6 +280,16 @@ class WinPredictor
             $awayScore += $doWeight * $aDo;
             $homeSignals[] = ['type' => 'drop_out_diff', 'weight' => $doWeight, 'strength' => $hDo, 'description' => $doDesc, 'side' => 'home'];
             $awaySignals[] = ['type' => 'drop_out_diff', 'weight' => $doWeight, 'strength' => $aDo, 'description' => $doDesc, 'side' => 'away'];
+        }
+
+        // --- Effective-tackle % edge (Phase 18) ---
+        [$hEt, $aEt, $etDesc] = $this->tackleEfficiencyEdge($match->home_team_id, $match->away_team_id);
+        if ($hEt !== null) {
+            $etWeight = $w['tackle_efficiency_edge'] ?? 0;
+            $homeScore += $etWeight * $hEt;
+            $awayScore += $etWeight * $aEt;
+            $homeSignals[] = ['type' => 'tackle_efficiency_edge', 'weight' => $etWeight, 'strength' => $hEt, 'description' => $etDesc, 'side' => 'home'];
+            $awaySignals[] = ['type' => 'tackle_efficiency_edge', 'weight' => $etWeight, 'strength' => $aEt, 'description' => $etDesc, 'side' => 'away'];
         }
 
         // --- Bookmaker line consensus ---
@@ -959,6 +974,39 @@ class WinPredictor
             return null;
         }
         return (float) $rows->avg(fn ($r) => (float) $r->forced_drop_outs);
+    }
+
+    /**
+     * Phase 18: net effective-tackle % edge (last 5). First-contact defensive
+     * quality differential. Pair-normalised via {@see normalisePair()}.
+     *
+     * @return array{0:?float,1:?float,2:string}
+     */
+    protected function tackleEfficiencyEdge(int $homeId, int $awayId): array
+    {
+        $hPct = $this->teamEffectiveTacklePct($homeId);
+        $aPct = $this->teamEffectiveTacklePct($awayId);
+        if ($hPct === null || $aPct === null) {
+            return [null, null, 'No effective-tackle history yet'];
+        }
+        [$hStr, $aStr] = $this->normalisePair($hPct, $aPct);
+        $desc = sprintf('%.1f%% vs %.1f%% effective tackle (last 5)', $hPct, $aPct);
+        return [$hStr, $aStr, $desc];
+    }
+
+    protected function teamEffectiveTacklePct(int $teamId): ?float
+    {
+        $rows = MatchTeamStats::where('team_id', $teamId)
+            ->whereHas('match', fn ($q) => $q->where('status', 'completed'))
+            ->whereNotNull('effective_tackle_pct')
+            ->orderByDesc('id')
+            ->limit(5)
+            ->get(['effective_tackle_pct']);
+
+        if ($rows->count() < 3) {
+            return null;
+        }
+        return (float) $rows->avg(fn ($r) => (float) $r->effective_tackle_pct);
     }
 
     protected function median(array $values): float

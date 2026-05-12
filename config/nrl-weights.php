@@ -73,6 +73,11 @@ return [
         // Phase 17: penalty differential + opp effective-tackle %
         'team_penalty_diff'          => 6,   // Net penalties drawn per game (last 5) — field position
         'opp_effective_tackle_pct'   => 6,   // Lower opp effective-tackle % ⇒ more broken-line carries
+        // Phase 18: own completion-rate retention (set-end quality)
+        'team_completion_rate'       => 6,   // Own rolling completion % (last 5) ⇒ sustained pressure
+        // Phase 19: per-carry post-contact metres (bend-the-line quality)
+        'team_pcm_per_run'           => 7,   // Own PCM/run (last 5) ⇒ relentless forward push
+        'opp_pcm_per_run_concede'    => 6,   // Opp PCM/run conceded — defences that don't anchor
     ],
 
     // ── Match-level signals (applied to all players) ─────
@@ -106,6 +111,10 @@ return [
         'attacking_threat'  => 9,   // Rolling line-breaks + tackle-breaks advantage
         'error_differential'=> 12,  // Net errors/game (last 5) — Eye Test 2025 finds fewer-errors team wins ~77.5%
         'possession_share'  => 8,   // Rolling possession % advantage (last 5)
+        // Phase 18: net effective-tackle % edge (last 5). First-contact quality —
+        // distinct from raw missed-tackle count (volume) and yardage_dominance (metres).
+        // League band 88–94%; ~2pp gap is meaningful.
+        'tackle_efficiency_edge' => 8,
     ],
 
     // ── Position base try-scoring weights ─────────────────
