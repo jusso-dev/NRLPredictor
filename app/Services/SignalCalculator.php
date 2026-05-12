@@ -238,6 +238,27 @@ class SignalCalculator
         // (92 − pct)/6 ⇒ [0, 1]. Position share favours back-five who feast
         // on broken tackles in space.
         'opp_effective_tackle_pct'   => 6,
+        // Phase 18: own rolling completion % (last 5). Set-end retention —
+        // distinct from `opp_completion_pressure` (opp's completion as inverse),
+        // `opponent_error_rate` (opp errors give us ball), and `team_set_efficiency`
+        // (tries-per-set conversion quality). Higher own completion = more
+        // sustained attacking sets and more red-zone reps. League band 76–86%;
+        // maps [0.76, 0.86] → [0, 1]. Position share favours back-five who
+        // finish prolonged attacking sets.
+        'team_completion_rate'       => 6,
+        // Phase 19: post-contact metres per run (bend-the-line yardage quality).
+        // Own PCM/run (last 5) measures relentless forward push at carry level —
+        // orthogonal to `team_explosive_rate` (events: TB+LB+offloads ÷ runs)
+        // and `yardage_dominance` (raw m total without per-carry normalisation).
+        // 2026-05-13 R1–R10 spread: 2.39 (Knights) → 3.28 (Roosters), median ~3.0.
+        // Maps [2.50, 3.20] → [0, 1]. Position share weights edge runners +
+        // back-five who finish off bent-line sets.
+        'team_pcm_per_run'           => 7,
+        // Opp PCM/run conceded (last 5) — defences that don't anchor first contact
+        // give up bent-line carries that set up short-field tries. Mirror of
+        // team_pcm_per_run on the defensive side, same band. Distinct from
+        // `opp_post_contact_concede` (raw m/g, volume) by per-carry normalisation.
+        'opp_pcm_per_run_concede'    => 6,
     ];
 
     public const POSITION_ADVANTAGE = [
@@ -342,6 +363,13 @@ class SignalCalculator
         // Phase 17: penalty differential (field position) + opp effective tackle %
         $signals[] = $this->teamPenaltyDiff($player, $w);
         $signals[] = $this->oppEffectiveTacklePct($player, $opponentId, $w);
+
+        // Phase 18: own completion-rate retention
+        $signals[] = $this->teamCompletionRate($player, $w);
+
+        // Phase 19: per-carry post-contact metres (attack + defence)
+        $signals[] = $this->teamPcmPerRun($player, $w);
+        $signals[] = $this->oppPcmPerRunConcede($player, $opponentId, $w);
 
         return array_values(array_filter($signals));
     }
@@ -2535,6 +2563,154 @@ class SignalCalculator
             'weight' => $weight,
             'strength' => $strength,
             'description' => sprintf('Opp effective tackle %.1f%% (last %d)', $avg, $rows->count()),
+        ];
+    }
+
+    /**
+     * Phase 18: own rolling completion % (last 5). Set-end retention quality —
+     * complements opp_completion_pressure (opp side) by capturing whether OUR
+     * sets finish cleanly. Sustained completion ⇒ more attacking reps ⇒ more
+     * red-zone chances. Maps [0.76, 0.86] → [0, 1].
+     */
+    protected function teamCompletionRate(Player $player, array $w): array
+    {
+        $weight = $w['team_completion_rate'] ?? 6;
+        if (! $player->team_id) {
+            return ['type' => 'team_completion_rate', 'weight' => $weight, 'strength' => 0.0, 'description' => 'Team unknown'];
+        }
+
+        $rows = MatchTeamStats::where('team_id', $player->team_id)
+            ->whereHas('match', fn ($q) => $q->where('status', 'completed'))
+            ->where('completion_denominator', '>', 0)
+            ->orderByDesc('id')
+            ->limit(5)
+            ->get(['completion_numerator', 'completion_denominator']);
+
+        if ($rows->count() < 3) {
+            return ['type' => 'team_completion_rate', 'weight' => $weight, 'strength' => 0.0, 'description' => 'Insufficient own completion history'];
+        }
+
+        $rate = (float) $rows->avg(fn ($r) => $r->completion_numerator / max(1, $r->completion_denominator));
+        $base = max(0.0, min(1.0, ($rate - 0.76) / 0.10));
+        $share = match ($player->position) {
+            'winger', 'fullback', 'centre' => 1.00,
+            'second-row'                   => 0.70,
+            'five-eighth', 'halfback'      => 0.55,
+            'lock'                         => 0.40,
+            'hooker'                       => 0.35,
+            default                        => 0.25,
+        };
+        $strength = min(1.0, $base * $share);
+
+        return [
+            'type' => 'team_completion_rate',
+            'weight' => $weight,
+            'strength' => $strength,
+            'description' => sprintf('Own completion %.1f%% (last %d)', $rate * 100, $rows->count()),
+        ];
+    }
+
+    /**
+     * Phase 19: own post-contact metres per run (last 5). Per-carry bend-the-line
+     * yardage quality. Maps [1.85, 2.30] → [0, 1].
+     */
+    protected function teamPcmPerRun(Player $player, array $w): array
+    {
+        $weight = $w['team_pcm_per_run'] ?? 7;
+        if (! $player->team_id) {
+            return ['type' => 'team_pcm_per_run', 'weight' => $weight, 'strength' => 0.0, 'description' => 'Team unknown'];
+        }
+
+        $rows = MatchTeamStats::where('team_id', $player->team_id)
+            ->whereHas('match', fn ($q) => $q->where('status', 'completed'))
+            ->where('all_runs', '>', 0)
+            ->orderByDesc('id')
+            ->limit(5)
+            ->get(['post_contact_metres', 'all_runs']);
+
+        if ($rows->count() < 3) {
+            return ['type' => 'team_pcm_per_run', 'weight' => $weight, 'strength' => 0.0, 'description' => 'Insufficient PCM history'];
+        }
+
+        $pcm = $rows->sum(fn ($r) => (float) ($r->post_contact_metres ?? 0));
+        $runs = $rows->sum(fn ($r) => (int) ($r->all_runs ?? 0));
+        if ($runs <= 0) {
+            return ['type' => 'team_pcm_per_run', 'weight' => $weight, 'strength' => 0.0, 'description' => 'No run data'];
+        }
+
+        $rate = $pcm / $runs;
+        $base = max(0.0, min(1.0, ($rate - 2.50) / 0.70));
+        $share = match ($player->position) {
+            'winger', 'fullback', 'centre' => 1.00,
+            'second-row'                   => 0.85,
+            'five-eighth', 'halfback'      => 0.50,
+            'lock'                         => 0.55,
+            'hooker'                       => 0.35,
+            'prop'                         => 0.45,
+            default                        => 0.30,
+        };
+        $strength = min(1.0, $base * $share);
+
+        return [
+            'type' => 'team_pcm_per_run',
+            'weight' => $weight,
+            'strength' => $strength,
+            'description' => sprintf('%.2f PCM/run (last %d)', $rate, $rows->count()),
+        ];
+    }
+
+    /**
+     * Phase 19: opp PCM/run conceded (last 5). Defensive anchor quality at
+     * first contact. Same calibration band as team_pcm_per_run.
+     */
+    protected function oppPcmPerRunConcede(Player $player, int $opponentId, array $w): array
+    {
+        $weight = $w['opp_pcm_per_run_concede'] ?? 6;
+
+        // Opp PCM/run CONCEDED = the attackers' PCM/run from matches against opp.
+        // Pull matches the opp played, then take the OTHER team's stats.
+        $matchIds = Matchup::where('status', 'completed')
+            ->where(fn ($q) => $q->where('home_team_id', $opponentId)->orWhere('away_team_id', $opponentId))
+            ->orderByDesc('kickoff_at')
+            ->limit(5)
+            ->pluck('id');
+
+        if ($matchIds->isEmpty()) {
+            return ['type' => 'opp_pcm_per_run_concede', 'weight' => $weight, 'strength' => 0.0, 'description' => 'No opp history'];
+        }
+
+        $rows = MatchTeamStats::whereIn('match_id', $matchIds)
+            ->where('team_id', '!=', $opponentId)
+            ->where('all_runs', '>', 0)
+            ->get(['post_contact_metres', 'all_runs']);
+
+        if ($rows->count() < 3) {
+            return ['type' => 'opp_pcm_per_run_concede', 'weight' => $weight, 'strength' => 0.0, 'description' => 'Insufficient opp PCM history'];
+        }
+
+        $pcm = $rows->sum(fn ($r) => (float) ($r->post_contact_metres ?? 0));
+        $runs = $rows->sum(fn ($r) => (int) ($r->all_runs ?? 0));
+        if ($runs <= 0) {
+            return ['type' => 'opp_pcm_per_run_concede', 'weight' => $weight, 'strength' => 0.0, 'description' => 'No opp run data'];
+        }
+
+        $rate = $pcm / $runs;
+        $base = max(0.0, min(1.0, ($rate - 2.50) / 0.70));
+        $share = match ($player->position) {
+            'winger', 'fullback', 'centre' => 1.00,
+            'second-row'                   => 0.80,
+            'five-eighth', 'halfback'      => 0.50,
+            'lock'                         => 0.45,
+            'hooker'                       => 0.35,
+            default                        => 0.25,
+        };
+        $strength = min(1.0, $base * $share);
+
+        return [
+            'type' => 'opp_pcm_per_run_concede',
+            'weight' => $weight,
+            'strength' => $strength,
+            'description' => sprintf('Opp concedes %.2f PCM/run (last %d)', $rate, $rows->count()),
         ];
     }
 }
