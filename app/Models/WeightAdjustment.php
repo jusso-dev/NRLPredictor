@@ -15,5 +15,10 @@ class WeightAdjustment extends Model
         'accuracy_before' => 'float',
         'accuracy_after' => 'float',
         'brier_score' => 'float',
+        'log_loss' => 'float',
+        'value_score' => 'float',
+        'market_brier' => 'float',
+        'market_log_loss' => 'float',
+        'graded_predictions' => 'integer',
     ];
 }
