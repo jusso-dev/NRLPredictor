@@ -22,6 +22,47 @@
                     @endif
                 </div>
             </div>
+
+            @php($cal = $row['calibration'] ?? null)
+            @if ($cal && $cal->brier_score !== null)
+                <div class="mb-4 grid gap-3 rounded border border-ink-600 bg-ink-950/60 p-3 text-xs sm:grid-cols-4">
+                    <div>
+                        <div class="lbl">Brier</div>
+                        <div class="font-mono text-bone-50">{{ number_format($cal->brier_score, 3) }}</div>
+                        @if ($cal->market_brier !== null)
+                            <div class="text-bone-500">mkt {{ number_format($cal->market_brier, 3) }}</div>
+                        @endif
+                    </div>
+                    <div>
+                        <div class="lbl">Log loss</div>
+                        <div class="font-mono text-bone-50">{{ $cal->log_loss !== null ? number_format($cal->log_loss, 3) : '—' }}</div>
+                        @if ($cal->market_log_loss !== null)
+                            <div class="text-bone-500">mkt {{ number_format($cal->market_log_loss, 3) }}</div>
+                        @endif
+                    </div>
+                    <div>
+                        <div class="lbl">Value vs market</div>
+                        @if ($cal->value_score !== null)
+                            <div class="font-mono {{ $cal->value_score >= 0 ? 'text-signal-green' : 'text-signal-red' }}">
+                                {{ ($cal->value_score >= 0 ? '+' : '') . number_format($cal->value_score, 3) }}
+                            </div>
+                        @else
+                            <div class="font-mono text-bone-500">—</div>
+                        @endif
+                    </div>
+                    <div>
+                        <div class="lbl">Verdict</div>
+                        @if ($cal->market_brier !== null)
+                            <div class="font-mono {{ $cal->brier_score < $cal->market_brier ? 'text-signal-green' : 'text-bone-400' }}">
+                                {{ $cal->brier_score < $cal->market_brier ? 'beats market' : 'trails market' }}
+                            </div>
+                        @else
+                            <div class="font-mono text-bone-500">no market data</div>
+                        @endif
+                    </div>
+                </div>
+            @endif
+
             <div class="grid gap-3 md:grid-cols-2">
                 @foreach ($row['items'] as $item)
                     <div class="flex items-center gap-3 rounded border border-ink-600 px-3 py-2
