@@ -51,21 +51,35 @@ class ValuePicks extends Component
                 'picks' => collect(),
                 'confidence' => $this->latestConfidence(),
                 'threshold' => $this->threshold,
+                'emptyState' => $this->emptyState('no_matches', []),
             ]);
         }
 
         $matchIds = $matches->pluck('id');
 
-        // Pull every prediction in these matches that has both model and
-        // market probabilities, with a meaningful edge over the market.
-        $predictions = Prediction::with('player.team')
+        // One query, then bucket counts off the same collection so we can tell
+        // the user *why* the list is empty (warming up vs no odds vs no edge).
+        $allPredictions = Prediction::with('player.team')
             ->whereIn('match_id', $matchIds)
-            ->whereNotNull('model_prob')
-            ->whereNotNull('market_prob')
-            ->get()
-            ->filter(fn (Prediction $p) => ($p->model_prob - $p->market_prob) >= $this->threshold)
+            ->get();
+
+        $totals = [
+            'matches' => $matches->count(),
+            'predictions' => $allPredictions->count(),
+            'with_model' => $allPredictions->whereNotNull('model_prob')->count(),
+            'with_market' => $allPredictions->whereNotNull('market_prob')->count(),
+        ];
+        $totals['with_both'] = $allPredictions
+            ->filter(fn ($p) => $p->model_prob !== null && $p->market_prob !== null)
+            ->count();
+
+        $predictions = $allPredictions
+            ->filter(fn (Prediction $p) => $p->model_prob !== null
+                && $p->market_prob !== null
+                && ($p->model_prob - $p->market_prob) >= $this->threshold)
             ->sortByDesc(fn (Prediction $p) => $p->model_prob - $p->market_prob)
-            ->take(40);
+            ->take(40)
+            ->values();
 
         $bestOdds = $this->bestOddsFor($matchIds, $predictions->pluck('player_id'));
         $matchesById = $matches->keyBy('id');
@@ -81,13 +95,87 @@ class ValuePicks extends Component
                 'fair_decimal' => $p->model_prob > 0 ? 1 / $p->model_prob : null,
                 'best_decimal' => $bestOdds[$p->match_id][$p->player_id] ?? null,
             ];
-        })->values();
+        });
+
+        $emptyState = $picks->isEmpty() ? $this->emptyState($this->diagnose($totals), $totals) : null;
 
         return view('livewire.value-picks', [
             'picks' => $picks,
             'confidence' => $this->latestConfidence(),
             'threshold' => $this->threshold,
+            'emptyState' => $emptyState,
         ]);
+    }
+
+    /**
+     * Work out *why* there are no picks so the empty state can say something
+     * useful. Order matters — earlier checks describe the most fundamental gap.
+     */
+    protected function diagnose(array $totals): string
+    {
+        if ($totals['predictions'] === 0) {
+            return 'no_predictions';
+        }
+        if ($totals['with_model'] === 0) {
+            return 'warming_up';
+        }
+        if ($totals['with_market'] === 0) {
+            return 'no_market';
+        }
+        if ($totals['with_both'] === 0) {
+            return 'no_overlap';
+        }
+        return 'no_edge';
+    }
+
+    protected function emptyState(string $reason, array $totals): array
+    {
+        $pending = max(0, ($totals['predictions'] ?? 0) - ($totals['with_model'] ?? 0));
+
+        return match ($reason) {
+            'no_matches' => [
+                'reason' => $reason,
+                'title' => 'No upcoming matches',
+                'detail' => 'Value picks compare upcoming predictions to live bookmaker odds. There are no upcoming or live matches in scope right now — check back after the next round is loaded.',
+                'hint' => null,
+            ],
+            'no_predictions' => [
+                'reason' => $reason,
+                'title' => 'Predictions not yet generated',
+                'detail' => "There are {$totals['matches']} upcoming match(es) but no predictions have been written for them yet.",
+                'hint' => 'The scheduler runs RunPredictionAnalysis every 30 minutes. To trigger immediately: docker compose exec app php artisan nrl:predict',
+            ],
+            'warming_up' => [
+                'reason' => $reason,
+                'title' => 'Calibration warming up',
+                'detail' => "Found {$totals['predictions']} prediction(s) but {$pending} were written before the calibration layer was wired in, so they don't carry a model probability yet.",
+                'hint' => 'New predictions are auto-calibrated. To recalibrate the existing rows now: docker compose exec app php artisan nrl:predict (or wait up to 30 minutes for the scheduler).',
+            ],
+            'no_market' => [
+                'reason' => $reason,
+                'title' => 'No bookmaker odds yet',
+                'detail' => "{$totals['with_model']} prediction(s) have a model probability but no anytime-try-scorer market data is in the database for these matches yet.",
+                'hint' => 'Odds are fetched every 4 hours. To pull now: docker compose exec app php artisan nrl:fetch-odds',
+            ],
+            'no_overlap' => [
+                'reason' => $reason,
+                'title' => 'Model and market don\'t overlap on the same players',
+                'detail' => "We have {$totals['with_model']} predictions with model probabilities and {$totals['with_market']} with market probabilities, but no single player has both.",
+                'hint' => 'This usually clears up once the next nrl:fetch-odds + nrl:predict cycle runs — both jobs need to see the same team lists.',
+            ],
+            'no_edge' => [
+                'reason' => $reason,
+                'title' => 'Model agrees with the market',
+                'detail' => "Compared {$totals['with_both']} predictions head-to-head with the market and none exceed the current edge threshold.",
+                'hint' => 'Lower the edge filter to see closer picks, or wait — markets can move significantly in the hours before kickoff.',
+            ],
+            default => [
+                'reason' => $reason,
+                'title' => 'No value picks at this threshold',
+                'detail' => 'Lower the edge filter or check back closer to kickoff.',
+                'hint' => null,
+            ],
+        };
     }
 
     /**

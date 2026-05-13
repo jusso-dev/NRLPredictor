@@ -34,6 +34,22 @@
         <span class="ml-auto text-bone-500">{{ $picks->count() }} pick{{ $picks->count() === 1 ? '' : 's' }}</span>
     </div>
 
+    @if ($picks->isEmpty() && $emptyState)
+        <div class="card p-8 sm:p-10">
+            <div class="flex flex-col gap-3">
+                <div class="lbl">{{ str_replace('_', ' ', $emptyState['reason']) }}</div>
+                <h2 class="h-display text-xl text-bone-50">{{ $emptyState['title'] }}</h2>
+                <p class="max-w-2xl text-sm text-bone-300">{{ $emptyState['detail'] }}</p>
+                @if ($emptyState['hint'])
+                    <div class="mt-2 rounded border border-ink-600 bg-ink-950 p-3 text-xs text-bone-400">
+                        <span class="lbl mr-2">Next step</span>
+                        <span class="font-mono">{{ $emptyState['hint'] }}</span>
+                    </div>
+                @endif
+            </div>
+        </div>
+    @endif
+
     @forelse ($picks as $pick)
         @php($pred = $pick['prediction'])
         @php($match = $pick['match'])
@@ -83,11 +99,5 @@
             </div>
         </section>
     @empty
-        <div class="card p-10 text-center text-bone-400">
-            <div class="h-display text-base text-bone-200">No value picks at this threshold</div>
-            <p class="mt-2 text-xs">
-                Either no upcoming matches have bookmaker odds yet, or the model agrees with the market across the board. Lower the edge filter or check back closer to kickoff.
-            </p>
-        </div>
     @endforelse
 </div>
