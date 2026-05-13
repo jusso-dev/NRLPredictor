@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\BackfillCalibrationGrades;
 use App\Models\Matchup;
 use App\Models\Round;
 use App\Services\CalibrationGrader;
@@ -13,13 +14,24 @@ class GradeRoundCommand extends Command
         {round? : Round number to grade}
         {--season= : Season year (defaults to current)}
         {--all : Grade every completed round with predictions in this season}
-        {--backfill : Skip rounds where predictions already have model_prob set}';
+        {--backfill : Skip rounds where predictions already have model_prob set}
+        {--queue : Dispatch a background job instead of grading inline}';
 
     protected $description = 'Compute calibration metrics (Brier, log loss, value vs market) for a completed round without touching weights.';
 
     public function handle(CalibrationGrader $grader): int
     {
         $season = (int) ($this->option('season') ?: now()->year);
+
+        // --queue: hand off to the BackfillCalibrationGrades job and return
+        // immediately. The job grades every ungraded completed round for the
+        // season; the optional --round / --all flags are ignored in this mode
+        // since the job already iterates all candidates.
+        if ($this->option('queue')) {
+            BackfillCalibrationGrades::dispatch($season);
+            $this->info("Dispatched BackfillCalibrationGrades for season {$season} to the queue.");
+            return self::SUCCESS;
+        }
 
         $rounds = $this->resolveRounds($season);
         if (empty($rounds)) {
