@@ -6,6 +6,7 @@ use App\Models\Matchup;
 use App\Models\OddsSnapshot;
 use App\Models\Prediction;
 use App\Models\Round;
+use App\Models\WeightAdjustment;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -47,6 +48,11 @@ class CalibrationGrader
     // Clip probabilities before log() to keep log loss finite on a single bad call.
     protected const LOG_EPS = 0.001;
 
+    // Cache the latest persisted logistic per service instance so PredictionScorer
+    // doesn't re-query weight_adjustments for every match in a round.
+    protected ?array $cachedLatestLogistic = null;
+    protected bool $latestLogisticLoaded = false;
+
     /**
      * Grade every prediction in a completed round and return aggregate metrics.
      */
@@ -61,7 +67,8 @@ class CalibrationGrader
         }
 
         $rankTable = $this->buildRankCalibrationTable($season, $roundNumber);
-        $logistic = $this->fitLogisticModel($season, $roundNumber);
+        $logisticFit = $this->fitLogisticModel($season, $roundNumber);
+        $logistic = $logisticFit === null ? null : [$logisticFit['b0'], $logisticFit['b1']];
 
         $matches = Matchup::with(['predictions', 'tryEvents'])
             ->where('round_id', $round->id)
@@ -103,6 +110,7 @@ class CalibrationGrader
 
         $metrics = $this->aggregateMetrics($topNRows);
         $metrics['summary'] = $this->buildSummary($metrics);
+        $metrics['logistic'] = $logisticFit; // [b0, b1, samples] or null — SignalTuner persists this
 
         Log::info(sprintf(
             'CalibrationGrader: R%d graded %d predictions. %s',
@@ -187,8 +195,8 @@ class CalibrationGrader
      * over all graded predictions before this round. Uses Newton-Raphson (IRLS)
      * with a small ridge term so the Hessian stays invertible on small samples.
      *
-     * Returns [b0, b1] or null if there isn't enough data or the fit fails to
-     * converge (caller falls back to rank-conditioned probabilities).
+     * Returns ['b0' => x, 'b1' => y, 'samples' => n] or null if there isn't
+     * enough data or the fit fails to converge.
      */
     protected function fitLogisticModel(int $season, int $excludeRound): ?array
     {
@@ -263,13 +271,66 @@ class CalibrationGrader
             $b1 -= $step1;
 
             if (abs($step0) < self::LOGISTIC_TOL && abs($step1) < self::LOGISTIC_TOL) {
-                return [$b0, $b1];
+                return ['b0' => $b0, 'b1' => $b1, 'samples' => $n];
             }
         }
 
         // Did not converge — return the last estimate anyway if the slope is
         // sensible (positive: higher score should mean higher hit rate).
-        return $b1 > 0 ? [$b0, $b1] : null;
+        return $b1 > 0 ? ['b0' => $b0, 'b1' => $b1, 'samples' => $n] : null;
+    }
+
+    /**
+     * Calibrated try probability for a single prediction, using the most
+     * recently persisted logistic from weight_adjustments (cached per
+     * instance). Falls through to a linear prior on rank when no logistic
+     * has been fit yet.
+     *
+     * Public so PredictionScorer can fill model_prob at write time without
+     * waiting for the round-after grading pass.
+     */
+    public function probForPrediction(int $score, int $rank): float
+    {
+        $logistic = $this->latestLogistic();
+        $logisticPair = $logistic === null ? null : [$logistic['b0'], $logistic['b1']];
+
+        // Empty rank table is fine — modelProbForPrediction falls through to
+        // the linear prior. We could load the rank table here too, but the
+        // logistic kicks in well before rank-conditioning becomes informative.
+        return $this->modelProbForPrediction($score, $rank, $logisticPair, []);
+    }
+
+    /**
+     * Latest persisted logistic coefficients, cached for this service instance.
+     * Returns ['b0' => x, 'b1' => y, 'samples' => n] or null if none on file.
+     */
+    public function latestLogistic(): ?array
+    {
+        if ($this->latestLogisticLoaded) {
+            return $this->cachedLatestLogistic;
+        }
+
+        $row = WeightAdjustment::whereNotNull('logistic_b0')
+            ->whereNotNull('logistic_b1')
+            ->orderByDesc('after_round')
+            ->orderByDesc('id')
+            ->first();
+
+        $this->cachedLatestLogistic = $row
+            ? ['b0' => (float) $row->logistic_b0, 'b1' => (float) $row->logistic_b1, 'samples' => (int) ($row->logistic_samples ?? 0)]
+            : null;
+        $this->latestLogisticLoaded = true;
+
+        return $this->cachedLatestLogistic;
+    }
+
+    /**
+     * Public alias for marketProbsForMatch so PredictionScorer can fill
+     * market_prob at write time using the same median-of-books logic.
+     */
+    public function marketProbsFor(int $matchId): array
+    {
+        return $this->marketProbsForMatch($matchId);
     }
 
     /**

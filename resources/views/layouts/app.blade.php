@@ -24,6 +24,7 @@
 <body class="min-h-screen">
     @php($navLinks = [
         'dashboard'   => 'Dashboard',
+        'value-picks' => 'Value Picks',
         'multi-bet'   => 'Multi Builder',
         'leaderboard' => 'Leaderboard',
         'accuracy'    => 'Accuracy',

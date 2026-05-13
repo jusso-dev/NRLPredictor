@@ -8,7 +8,10 @@ use Illuminate\Support\Facades\DB;
 
 class PredictionScorer
 {
-    public function __construct(protected SignalCalculator $signals) {}
+    public function __construct(
+        protected SignalCalculator $signals,
+        protected CalibrationGrader $calibration,
+    ) {}
 
     /**
      * Score every player in a match, return the persisted top-15 predictions ordered by rank.
@@ -63,7 +66,10 @@ class PredictionScorer
         $top = array_slice($rows, 0, 15);
         $version = (Prediction::where('match_id', $match->id)->max('version') ?? 0) + 1;
 
-        DB::transaction(function () use ($top, $match, $max, $version) {
+        // Pull market probabilities once per match instead of per-prediction.
+        $marketProbs = $this->calibration->marketProbsFor($match->id);
+
+        DB::transaction(function () use ($top, $match, $max, $version, $marketProbs) {
             // Only delete predictions for matches that haven't completed yet
             if ($match->status !== 'completed') {
                 Prediction::where('match_id', $match->id)->delete();
@@ -76,13 +82,21 @@ class PredictionScorer
             $rank = 1;
             foreach ($top as $row) {
                 $score = (int) round(($row['raw'] / $max) * 100);
+                $clamped = max(0, min(100, $score));
+                $modelProb = round($this->calibration->probForPrediction($clamped, $rank), 4);
+                $marketProb = isset($marketProbs[$row['player_id']])
+                    ? round($marketProbs[$row['player_id']], 4)
+                    : null;
+
                 Prediction::create([
                     'match_id' => $match->id,
                     'player_id' => $row['player_id'],
-                    'score' => max(0, min(100, $score)),
+                    'score' => $clamped,
                     'rank_in_match' => $rank++,
                     'signals' => $row['signals'],
                     'version' => $version,
+                    'model_prob' => $modelProb,
+                    'market_prob' => $marketProb,
                 ]);
             }
         });

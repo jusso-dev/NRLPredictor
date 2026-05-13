@@ -11,6 +11,7 @@ use App\Livewire\Calibration;
 use App\Livewire\Learning;
 use App\Livewire\Methodology;
 use App\Livewire\MultiBet;
+use App\Livewire\ValuePicks;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', Dashboard::class)->name('dashboard');
@@ -19,6 +20,7 @@ Route::get('/leaderboard', Leaderboard::class)->name('leaderboard');
 Route::get('/accuracy', Accuracy::class)->name('accuracy');
 Route::get('/chat', Chat::class)->name('chat');
 Route::get('/multi-builder', MultiBet::class)->name('multi-bet');
+Route::get('/value-picks', ValuePicks::class)->name('value-picks');
 Route::get('/how-it-works', Methodology::class)->name('methodology');
 Route::get('/calibration', Calibration::class)->name('calibration');
 Route::get('/learning', Learning::class)->name('learning');

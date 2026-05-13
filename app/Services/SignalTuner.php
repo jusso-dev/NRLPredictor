@@ -256,6 +256,8 @@ class SignalTuner
 
         $reasoning = $this->buildReasoning($changed, $accuracy, $calibration);
 
+        $logistic = $calibration['logistic'] ?? null;
+
         return WeightAdjustment::create([
             'season' => $season,
             'after_round' => $round,
@@ -269,6 +271,9 @@ class SignalTuner
             'market_brier' => $calibration['market_brier'] ?? null,
             'market_log_loss' => $calibration['market_log_loss'] ?? null,
             'graded_predictions' => $calibration['graded'] ?? null,
+            'logistic_b0' => $logistic['b0'] ?? null,
+            'logistic_b1' => $logistic['b1'] ?? null,
+            'logistic_samples' => $logistic['samples'] ?? null,
             'reasoning' => $reasoning,
         ]);
     }
