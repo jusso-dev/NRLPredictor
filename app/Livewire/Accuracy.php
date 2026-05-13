@@ -3,8 +3,10 @@
 namespace App\Livewire;
 
 use App\Models\Matchup;
+use App\Models\ModelAlert;
 use App\Models\Round;
 use App\Models\TryEvent;
+use App\Models\WeightAdjustment;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -23,6 +25,13 @@ class Accuracy extends Component
             ->orderByDesc('round_number')
             ->limit(8)
             ->get();
+
+        // Pull calibration metrics for every visible round in one shot.
+        // Keyed by "{season}-{round}" so the loop below can index in O(1).
+        $adjustmentsByRound = WeightAdjustment::whereIn('after_round', $rounds->pluck('round_number'))
+            ->whereIn('season', $rounds->pluck('season')->unique())
+            ->get()
+            ->keyBy(fn ($a) => $a->season . '-' . $a->after_round);
 
         $summary = ['total' => 0, 'hits' => 0];
         $rows = [];
@@ -59,15 +68,19 @@ class Accuracy extends Component
                 'hits' => $roundHits,
                 'total' => $roundTotal,
                 'items' => $items,
+                'calibration' => $adjustmentsByRound->get($round->season . '-' . $round->round_number),
             ];
         }
 
         $pct = $summary['total'] > 0 ? round($summary['hits'] / $summary['total'] * 100, 1) : 0;
 
+        $alerts = ModelAlert::unresolved()->orderByDesc('created_at')->get();
+
         return view('livewire.accuracy', [
             'rows' => $rows,
             'pct' => $pct,
             'summary' => $summary,
+            'alerts' => $alerts,
         ]);
     }
 }

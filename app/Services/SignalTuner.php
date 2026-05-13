@@ -32,6 +32,11 @@ class SignalTuner
     // Minimum sample size before we trust a signal's delta
     protected const MIN_SAMPLE = 10;
 
+    public function __construct(
+        protected CalibrationGrader $grader,
+        protected ModelAlertChecker $alertChecker,
+    ) {}
+
     /**
      * Run the full tuning loop for a completed round.
      */
@@ -60,8 +65,16 @@ class SignalTuner
         // Step 5: Compute accuracy metrics
         $accuracyBefore = $this->computeAccuracy($round);
 
+        // Step 5b: Calibration + market-divergence grading. Writes per-prediction
+        // probabilities and was_hit flags; returns round-level Brier/log-loss/value.
+        $calibration = $this->grader->gradeRound($season, $roundNumber);
+
         // Step 6: Persist (DB row is the source of truth; SignalCalculator reads this back)
-        $adjustment = $this->persistAdjustment($season, $roundNumber, $currentWeights, $newWeights, $cumulativeDeltas, $accuracyBefore);
+        $adjustment = $this->persistAdjustment($season, $roundNumber, $currentWeights, $newWeights, $cumulativeDeltas, $accuracyBefore, $calibration);
+
+        // Step 6b: Check rolling Brier-vs-market trend; raise/resolve an alert
+        // if the model has been trailing the bookmaker for N consecutive rounds.
+        $this->alertChecker->checkAfterTuning($season, $roundNumber);
 
         // Step 7: Best-effort write to config file. The DB row above is what actually
         // feeds the live model — this is a convenience snapshot for humans.
@@ -71,9 +84,9 @@ class SignalTuner
         SignalCalculator::clearTunedCache();
 
         // Step 8: Generate agent prompt insights
-        $insights = $this->generateInsights($cumulativeDeltas, $signalStats, $accuracyBefore);
+        $insights = $this->generateInsights($cumulativeDeltas, $signalStats, $accuracyBefore, $calibration);
 
-        Log::info("SignalTuner: tuned after R{$roundNumber}. Accuracy={$accuracyBefore}%. " . count($newWeights) . ' weights adjusted.');
+        Log::info("SignalTuner: tuned after R{$roundNumber}. Accuracy={$accuracyBefore}%. " . count($newWeights) . ' weights adjusted. ' . ($calibration['summary'] ?? ''));
 
         return [
             'round' => $roundNumber,
@@ -82,6 +95,7 @@ class SignalTuner
             'weights_changed' => collect($currentWeights)->filter(fn ($v, $k) => ($newWeights[$k] ?? $v) !== $v)->count(),
             'insights' => $insights,
             'adjustment_id' => $adjustment->id,
+            'calibration' => $calibration,
         ];
     }
 
@@ -231,7 +245,7 @@ class SignalTuner
         return $total > 0 ? round($hits / $total * 100, 1) : 0;
     }
 
-    protected function persistAdjustment(int $season, int $round, array $old, array $new, array $deltas, float $accuracy): WeightAdjustment
+    protected function persistAdjustment(int $season, int $round, array $old, array $new, array $deltas, float $accuracy, array $calibration = []): WeightAdjustment
     {
         $changed = [];
         foreach ($new as $type => $weight) {
@@ -240,7 +254,7 @@ class SignalTuner
             }
         }
 
-        $reasoning = $this->buildReasoning($changed, $accuracy);
+        $reasoning = $this->buildReasoning($changed, $accuracy, $calibration);
 
         return WeightAdjustment::create([
             'season' => $season,
@@ -249,13 +263,23 @@ class SignalTuner
             'new_weights' => $new,
             'signal_deltas' => $deltas,
             'accuracy_before' => $accuracy,
+            'brier_score' => $calibration['brier'] ?? null,
+            'log_loss' => $calibration['log_loss'] ?? null,
+            'value_score' => $calibration['value_score'] ?? null,
+            'market_brier' => $calibration['market_brier'] ?? null,
+            'market_log_loss' => $calibration['market_log_loss'] ?? null,
+            'graded_predictions' => $calibration['graded'] ?? null,
             'reasoning' => $reasoning,
         ]);
     }
 
-    protected function buildReasoning(array $changed, float $accuracy): string
+    protected function buildReasoning(array $changed, float $accuracy, array $calibration = []): string
     {
         $lines = ["Round accuracy: {$accuracy}%"];
+
+        if (! empty($calibration['summary'])) {
+            $lines[] = $calibration['summary'];
+        }
 
         if (empty($changed)) {
             $lines[] = 'No weight changes — all signals performing within normal range.';
@@ -300,9 +324,36 @@ class SignalTuner
     /**
      * Generate insights for the Claude agent prompt.
      */
-    protected function generateInsights(array $deltas, array $roundStats, float $accuracy): string
+    protected function generateInsights(array $deltas, array $roundStats, float $accuracy, array $calibration = []): string
     {
         $insights = ["Current model accuracy: {$accuracy}% (top-5 hit rate)"];
+
+        // Calibration headline — answers "are our probabilities honest" and
+        // "do we beat the market" in a single block the agent can quote.
+        if (! empty($calibration) && ($calibration['graded'] ?? 0) > 0) {
+            if ($calibration['brier'] !== null) {
+                $insights[] = sprintf('Brier score: %.3f (lower is better; random=0.250)', $calibration['brier']);
+            }
+            if ($calibration['log_loss'] !== null) {
+                $insights[] = sprintf('Log loss: %.3f', $calibration['log_loss']);
+            }
+            if ($calibration['market_brier'] !== null) {
+                $verdict = $calibration['beats_market'] ? 'MODEL BEATS MARKET' : 'market beats model';
+                $insights[] = sprintf(
+                    'Market Brier: %.3f → %s by %.3f',
+                    $calibration['market_brier'],
+                    $verdict,
+                    abs($calibration['brier'] - $calibration['market_brier']),
+                );
+            }
+            if ($calibration['value_score'] !== null) {
+                $sign = $calibration['value_score'] >= 0 ? '+' : '';
+                $verdict = $calibration['value_score'] > 0.01
+                    ? 'model has alpha beyond market'
+                    : ($calibration['value_score'] < -0.01 ? 'model is contradicting market unprofitably' : 'flat');
+                $insights[] = sprintf('Value vs market: %s%.3f (%s)', $sign, $calibration['value_score'], $verdict);
+            }
+        }
 
         // Best performing signals
         arsort($deltas);
