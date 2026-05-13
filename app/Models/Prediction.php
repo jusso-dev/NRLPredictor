@@ -14,6 +14,9 @@ class Prediction extends Model
         'score' => 'integer',
         'rank_in_match' => 'integer',
         'version' => 'integer',
+        'model_prob' => 'float',
+        'market_prob' => 'float',
+        'was_hit' => 'boolean',
     ];
 
     public function match(): BelongsTo
