@@ -259,6 +259,14 @@ class SignalCalculator
         // team_pcm_per_run on the defensive side, same band. Distinct from
         // `opp_post_contact_concede` (raw m/g, volume) by per-carry normalisation.
         'opp_pcm_per_run_concede'    => 6,
+        // Phase 20: consecutive recent matches where team scored ≥4 tries.
+        // Captures rolling-boil attacking momentum that flat per-game averages
+        // smear out. Threshold ≥4 (NRL avg ~3.3 t/g) so signal actually
+        // discriminates — ≥3 saturates with most teams on max streak.
+        // Orthogonal to `team_attacking_form` (flat average) and
+        // `team_first_try_rate` (start dominance). Cap at 4; maps [0, 4] → [0, 1].
+        // Position share favours back-five + edges who finish high-scoring sets.
+        'team_attacking_streak'      => 6,
     ];
 
     public const POSITION_ADVANTAGE = [
@@ -370,6 +378,9 @@ class SignalCalculator
         // Phase 19: per-carry post-contact metres (attack + defence)
         $signals[] = $this->teamPcmPerRun($player, $w);
         $signals[] = $this->oppPcmPerRunConcede($player, $opponentId, $w);
+
+        // Phase 20: rolling-boil attacking streak (consecutive 3+ try matches)
+        $signals[] = $this->teamAttackingStreak($player, $w);
 
         return array_values(array_filter($signals));
     }
@@ -2711,6 +2722,72 @@ class SignalCalculator
             'weight' => $weight,
             'strength' => $strength,
             'description' => sprintf('Opp concedes %.2f PCM/run (last %d)', $rate, $rows->count()),
+        ];
+    }
+
+    /**
+     * Phase 20: count of consecutive recent matches where the team scored
+     * ≥4 tries. Threshold sits above league-avg (~3.3 t/g) so the streak
+     * actually discriminates — ≥3 t/g saturates with most teams on max.
+     * Streak ends as soon as we hit a sub-4-try match. Walking back from
+     * the most recent completed match captures "rolling boil" momentum
+     * that flat per-game try averages smear out.
+     *
+     * Distinct from:
+     *   - `team_attacking_form`     — flat avg tries/game (level)
+     *   - `team_first_try_rate`     — first-try dominance (start)
+     *   - `team_set_efficiency`     — tries per set (conversion quality)
+     *
+     * Cap streak at 4; maps [0, 4] → [0, 1] so a 2-game streak carries
+     * 50% strength. Position share favours back-five and edge runners
+     * who finish off high-scoring sets.
+     */
+    protected function teamAttackingStreak(Player $player, array $w): array
+    {
+        $weight = $w['team_attacking_streak'] ?? 6;
+
+        if (! $player->team_id) {
+            return ['type' => 'team_attacking_streak', 'weight' => $weight, 'strength' => 0.0, 'description' => 'Team unknown'];
+        }
+
+        $matches = Matchup::where('status', 'completed')
+            ->where(fn ($q) => $q->where('home_team_id', $player->team_id)->orWhere('away_team_id', $player->team_id))
+            ->orderByDesc('kickoff_at')
+            ->limit(8)
+            ->pluck('id');
+
+        if ($matches->isEmpty()) {
+            return ['type' => 'team_attacking_streak', 'weight' => $weight, 'strength' => 0.0, 'description' => 'No team match history'];
+        }
+
+        $streak = 0;
+        foreach ($matches as $matchId) {
+            $tries = TryEvent::where('match_id', $matchId)
+                ->whereHas('player', fn ($q) => $q->where('team_id', $player->team_id))
+                ->count();
+            if ($tries >= 4) {
+                $streak++;
+            } else {
+                break;
+            }
+        }
+
+        $base = max(0.0, min(1.0, $streak / 4.0));
+        $share = match ($player->position) {
+            'winger', 'fullback', 'centre' => 1.00,
+            'second-row'                   => 0.80,
+            'five-eighth', 'halfback'      => 0.65,
+            'lock'                         => 0.45,
+            'hooker'                       => 0.35,
+            default                        => 0.30,
+        };
+        $strength = min(1.0, $base * $share);
+
+        return [
+            'type' => 'team_attacking_streak',
+            'weight' => $weight,
+            'strength' => $strength,
+            'description' => sprintf('Team on %d-match 4+ try streak', $streak),
         ];
     }
 }
