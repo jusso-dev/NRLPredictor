@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\AutoTuneAfterRound;
+use App\Jobs\BackfillCalibrationGrades;
 use App\Jobs\ComputeMatchMetadata;
 use App\Jobs\ComputeTeamTryDistributions;
 use App\Jobs\DispatchAiAnalysisFanout;
@@ -66,6 +67,11 @@ Schedule::job(new RunPredictionAnalysis)
 
 // Self-tuning: grade predictions and adjust weights after each completed round
 Schedule::job(new AutoTuneAfterRound)->hourly()->withoutOverlapping(55);
+
+// Calibration backfill: catches any completed rounds whose predictions
+// weren't graded by the per-round tuner (missed runs, restored backups,
+// historical seasons loaded after the fact). Runs daily.
+Schedule::job(new BackfillCalibrationGrades)->dailyAt('05:00')->withoutOverlapping(595);
 
 // Expensive AI review every 2 hours — fans out one job per upcoming match
 // so the queue processes them in parallel if multiple workers are running.
