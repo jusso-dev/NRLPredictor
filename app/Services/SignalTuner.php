@@ -193,6 +193,27 @@ class SignalTuner
     }
 
     /**
+     * Pure function: given a current weight set and the cumulative signal
+     * deltas across recent rounds, return what the tuner *would* change them
+     * to — without persisting anything. Used by the Backtester to evaluate
+     * weight changes against held-out rounds before accepting them.
+     */
+    public function proposeWeights(array $currentWeights, array $deltas): array
+    {
+        return $this->adjustWeights($currentWeights, $deltas);
+    }
+
+    /**
+     * Same as cumulativeDeltas() but public for the Backtester. The protected
+     * version is still used internally; this just exposes it without changing
+     * the existing tuning flow.
+     */
+    public function deltasForRound(int $season, int $roundNumber): array
+    {
+        return $this->cumulativeDeltas($season, $roundNumber);
+    }
+
+    /**
      * Adjust weights based on cumulative deltas.
      * Positive delta = signal is predictive → increase weight.
      * Negative delta = signal is misleading → decrease weight.
