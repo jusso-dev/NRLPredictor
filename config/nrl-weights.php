@@ -78,6 +78,8 @@ return [
         // Phase 19: per-carry post-contact metres (bend-the-line quality)
         'team_pcm_per_run'           => 7,   // Own PCM/run (last 5) ⇒ relentless forward push
         'opp_pcm_per_run_concede'    => 6,   // Opp PCM/run conceded — defences that don't anchor
+        // Phase 20: rolling-boil attacking momentum
+        'team_attacking_streak'      => 6,   // Consecutive recent matches scoring ≥3 tries (max 5)
     ],
 
     // ── Match-level signals (applied to all players) ─────
