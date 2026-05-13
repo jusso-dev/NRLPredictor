@@ -32,7 +32,10 @@ class SignalTuner
     // Minimum sample size before we trust a signal's delta
     protected const MIN_SAMPLE = 10;
 
-    public function __construct(protected CalibrationGrader $grader) {}
+    public function __construct(
+        protected CalibrationGrader $grader,
+        protected ModelAlertChecker $alertChecker,
+    ) {}
 
     /**
      * Run the full tuning loop for a completed round.
@@ -68,6 +71,10 @@ class SignalTuner
 
         // Step 6: Persist (DB row is the source of truth; SignalCalculator reads this back)
         $adjustment = $this->persistAdjustment($season, $roundNumber, $currentWeights, $newWeights, $cumulativeDeltas, $accuracyBefore, $calibration);
+
+        // Step 6b: Check rolling Brier-vs-market trend; raise/resolve an alert
+        // if the model has been trailing the bookmaker for N consecutive rounds.
+        $this->alertChecker->checkAfterTuning($season, $roundNumber);
 
         // Step 7: Best-effort write to config file. The DB row above is what actually
         // feeds the live model — this is a convenience snapshot for humans.

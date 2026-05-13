@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Models\Matchup;
+use App\Models\ModelAlert;
 use App\Models\Round;
 use App\Models\TryEvent;
 use App\Models\WeightAdjustment;
@@ -73,10 +74,13 @@ class Accuracy extends Component
 
         $pct = $summary['total'] > 0 ? round($summary['hits'] / $summary['total'] * 100, 1) : 0;
 
+        $alerts = ModelAlert::unresolved()->orderByDesc('created_at')->get();
+
         return view('livewire.accuracy', [
             'rows' => $rows,
             'pct' => $pct,
             'summary' => $summary,
+            'alerts' => $alerts,
         ]);
     }
 }

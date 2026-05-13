@@ -35,6 +35,15 @@ class CalibrationGrader
     // hit rate; otherwise fall back to the linear prior.
     protected const MIN_RANK_SAMPLES = 20;
 
+    // Need this many total prior (score, was_hit) pairs before we trust a
+    // fitted logistic regression. Below this we use rank-conditioned only.
+    protected const MIN_LOGISTIC_SAMPLES = 100;
+
+    // Newton-Raphson iterations for the logistic fit. Two features (intercept +
+    // score) is convex and converges in well under 50 iterations in practice.
+    protected const LOGISTIC_MAX_ITER = 50;
+    protected const LOGISTIC_TOL = 1e-6;
+
     // Clip probabilities before log() to keep log loss finite on a single bad call.
     protected const LOG_EPS = 0.001;
 
@@ -51,7 +60,8 @@ class CalibrationGrader
             return $this->emptyResult('Round not found');
         }
 
-        $calibration = $this->buildRankCalibrationTable($season, $roundNumber);
+        $rankTable = $this->buildRankCalibrationTable($season, $roundNumber);
+        $logistic = $this->fitLogisticModel($season, $roundNumber);
 
         $matches = Matchup::with(['predictions', 'tryEvents'])
             ->where('round_id', $round->id)
@@ -70,7 +80,7 @@ class CalibrationGrader
             foreach ($sortedPredictions as $idx => $pred) {
                 $rank = $pred->rank_in_match;
                 $wasHit = $scorerIds->contains($pred->player_id) ? 1 : 0;
-                $modelProb = $this->modelProbForRank($rank, $calibration);
+                $modelProb = $this->modelProbForPrediction((int) $pred->score, $rank, $logistic, $rankTable);
                 $marketProb = $marketProbs[$pred->player_id] ?? null;
 
                 $perPredictionGrades[$pred->id] = [
@@ -143,17 +153,123 @@ class CalibrationGrader
         return $table;
     }
 
-    protected function modelProbForRank(int $rank, array $calibration): float
+    /**
+     * Probability cascade — tries the richest data source first:
+     *   1. Fitted logistic regression sigmoid(b0 + b1 * score/100)
+     *   2. Rank-conditioned empirical hit rate from prior rounds
+     *   3. Linear cold-start prior
+     *
+     * Score carries more information than rank alone — it captures the gap
+     * between top picks, not just their ordering — so the logistic fit
+     * generalises better as soon as we have ~100+ graded predictions.
+     */
+    protected function modelProbForPrediction(int $score, int $rank, ?array $logistic, array $rankTable): float
     {
+        if ($logistic !== null) {
+            $x = max(0, min(100, $score)) / 100;
+            $z = $logistic[0] + $logistic[1] * $x;
+            return max(0.01, min(0.95, 1.0 / (1.0 + exp(-$z))));
+        }
+
         $rank = max(1, min(15, $rank));
-        if (isset($calibration[$rank])) {
-            return max(0.01, min(0.95, $calibration[$rank]));
+        if (isset($rankTable[$rank])) {
+            return max(0.01, min(0.95, $rankTable[$rank]));
         }
 
         // Cold-start prior: rank 1 ≈ 40% try chance, declining ~2pp per rank.
         // Anchored to top-5 hit rate of ~35-40% seen empirically for NRL try
         // scorers when the model has any edge.
         return max(0.05, 0.40 - ($rank - 1) * 0.02);
+    }
+
+    /**
+     * Fit a 2-parameter logistic model: P(hit) = sigmoid(b0 + b1 * score/100)
+     * over all graded predictions before this round. Uses Newton-Raphson (IRLS)
+     * with a small ridge term so the Hessian stays invertible on small samples.
+     *
+     * Returns [b0, b1] or null if there isn't enough data or the fit fails to
+     * converge (caller falls back to rank-conditioned probabilities).
+     */
+    protected function fitLogisticModel(int $season, int $excludeRound): ?array
+    {
+        $rows = DB::table('predictions')
+            ->join('matches', 'matches.id', '=', 'predictions.match_id')
+            ->join('rounds', 'rounds.id', '=', 'matches.round_id')
+            ->whereNotNull('predictions.was_hit')
+            ->where(function ($q) use ($season, $excludeRound) {
+                $q->where('rounds.season', '<', $season)
+                  ->orWhere(function ($q2) use ($season, $excludeRound) {
+                      $q2->where('rounds.season', $season)
+                         ->where('rounds.round_number', '<', $excludeRound);
+                  });
+            })
+            ->select('predictions.score', 'predictions.was_hit')
+            ->get();
+
+        if ($rows->count() < self::MIN_LOGISTIC_SAMPLES) {
+            return null;
+        }
+
+        // Build feature matrix and label vector.
+        $xs = [];
+        $ys = [];
+        foreach ($rows as $row) {
+            $xs[] = max(0, min(100, (int) $row->score)) / 100;
+            $ys[] = (int) $row->was_hit;
+        }
+        $n = count($xs);
+
+        $b0 = 0.0;
+        $b1 = 0.0;
+
+        // Newton-Raphson on 2x2 system with ridge 1e-4 for numerical stability.
+        // For each iter: gradient g = X^T (p - y); hessian H = X^T W X (W diag p(1-p));
+        // beta_new = beta - H^{-1} g.
+        for ($iter = 0; $iter < self::LOGISTIC_MAX_ITER; $iter++) {
+            $g0 = 0.0; $g1 = 0.0;
+            $h00 = 0.0; $h01 = 0.0; $h11 = 0.0;
+
+            for ($i = 0; $i < $n; $i++) {
+                $z = $b0 + $b1 * $xs[$i];
+                $p = 1.0 / (1.0 + exp(-$z));
+                $r = $p - $ys[$i];
+                $w = $p * (1 - $p);
+
+                $g0 += $r;
+                $g1 += $r * $xs[$i];
+
+                $h00 += $w;
+                $h01 += $w * $xs[$i];
+                $h11 += $w * $xs[$i] * $xs[$i];
+            }
+
+            // Ridge
+            $h00 += 1e-4;
+            $h11 += 1e-4;
+
+            $det = $h00 * $h11 - $h01 * $h01;
+            if (abs($det) < 1e-12) {
+                return null; // singular — bail out, caller falls back
+            }
+
+            $invH00 =  $h11 / $det;
+            $invH01 = -$h01 / $det;
+            $invH11 =  $h00 / $det;
+
+            $step0 = $invH00 * $g0 + $invH01 * $g1;
+            $step1 = $invH01 * $g0 + $invH11 * $g1;
+
+            $b0 -= $step0;
+            $b1 -= $step1;
+
+            if (abs($step0) < self::LOGISTIC_TOL && abs($step1) < self::LOGISTIC_TOL) {
+                return [$b0, $b1];
+            }
+        }
+
+        // Did not converge — return the last estimate anyway if the slope is
+        // sensible (positive: higher score should mean higher hit rate).
+        return $b1 > 0 ? [$b0, $b1] : null;
     }
 
     /**

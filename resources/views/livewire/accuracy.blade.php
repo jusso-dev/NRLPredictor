@@ -11,6 +11,27 @@
         </div>
     </div>
 
+    @if (! $alerts->isEmpty())
+        <div class="space-y-3">
+            @foreach ($alerts as $alert)
+                @php($tone = $alert->severity === 'critical' ? 'border-signal-red/60 bg-signal-red/10' : 'border-gold-500/60 bg-gold-500/10')
+                <div class="card border {{ $tone }} p-4">
+                    <div class="flex items-start gap-3">
+                        <div class="font-mono text-xs uppercase {{ $alert->severity === 'critical' ? 'text-signal-red' : 'text-gold-500' }}">
+                            {{ $alert->severity }}
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <div class="text-sm text-bone-50">{{ $alert->message }}</div>
+                            <div class="mt-1 text-xs text-bone-400">
+                                Raised {{ $alert->created_at?->diffForHumans() }} · {{ str_replace('_', ' ', $alert->type) }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            @endforeach
+        </div>
+    @endif
+
     @forelse ($rows as $row)
         <section class="card p-5">
             <div class="mb-4 flex items-center justify-between">
