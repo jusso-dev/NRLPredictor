@@ -1,6 +1,7 @@
 <?php
 
 use App\Livewire\Accuracy;
+use App\Livewire\Backtest;
 use App\Livewire\Chat;
 use App\Livewire\Dashboard;
 use App\Livewire\Jobs;
@@ -24,5 +25,6 @@ Route::get('/value-picks', ValuePicks::class)->name('value-picks');
 Route::get('/how-it-works', Methodology::class)->name('methodology');
 Route::get('/calibration', Calibration::class)->name('calibration');
 Route::get('/learning', Learning::class)->name('learning');
+Route::get('/backtest', Backtest::class)->name('backtest');
 Route::get('/jobs', Jobs::class)->name('jobs');
 Route::get('/logs', Logs::class)->name('logs');

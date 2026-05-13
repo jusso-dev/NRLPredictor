@@ -30,6 +30,7 @@
         'accuracy'    => 'Accuracy',
         'calibration' => 'Calibration',
         'learning'    => 'Self-Tuning',
+        'backtest'    => 'Backtest',
         'chat'        => 'Chat',
         'methodology' => 'How It Works',
         'jobs'        => 'Jobs',
