@@ -10,7 +10,7 @@ class AgentInternalAuth
 {
     public function handle(Request $request, Closure $next): Response
     {
-        $expected = (string) config('services.claude_agent.internal_secret');
+        $expected = (string) config('services.ai_agent.internal_secret');
         $provided = (string) $request->header('X-Agent-Secret', '');
 
         if ($expected === '' || ! hash_equals($expected, $provided)) {

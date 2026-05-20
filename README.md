@@ -1,6 +1,6 @@
 # NRL Try Predictor
 
-Signal-driven NRL match and try-scorer prediction engine. Scrapes live data from nrl.com, runs a weighted signal model to rank likely try scorers, predicts match winners, enriches with live bookmaker odds, and optionally refines predictions with a Claude-powered analyst agent. Ships with a Tailwind/Livewire dashboard, a chat interface, a multi-bet builder, and a full public REST API.
+Signal-driven NRL match and try-scorer prediction engine. Scrapes live data from nrl.com, runs a weighted signal model to rank likely try scorers, predicts match winners, enriches with live bookmaker odds, and optionally refines predictions with an AI analyst (OpenAI Codex CLI). Ships with a Tailwind/Livewire dashboard, a chat interface, a multi-bet builder, and a full public REST API.
 
 > **Why this exists.** It's a portfolio piece exploring weighted-signal modelling, AI agent tool-use, and a clean separation between deterministic statistical scoring and LLM-driven qualitative review. Predictions are for entertainment only — not betting advice.
 
@@ -37,7 +37,7 @@ Signal-driven NRL match and try-scorer prediction engine. Scrapes live data from
 
 ![Methodology](docs/screenshots/methodology.png)
 
-### Chat — conversational Claude analyst with tool access to scraped data
+### Chat — conversational AI analyst with access to scraped data
 
 ![Chat](docs/screenshots/chat.png)
 
@@ -56,8 +56,8 @@ Signal-driven NRL match and try-scorer prediction engine. Scrapes live data from
 │       │ HTTP (internal)                                  │
 │       ▼                                                  │
 │  ┌──────────┐                                            │
-│  │  agent   │  Python Flask + Claude Agent SDK           │
-│  │  :5055   │  AI analysis, chat, tool-use agent loop   │
+│  │  agent   │  Python Flask + OpenAI Codex CLI           │
+│  │  :5055   │  AI analysis + chat (ChatGPT Pro auth)     │
 │  └──────────┘                                            │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -67,7 +67,7 @@ Signal-driven NRL match and try-scorer prediction engine. Scrapes live data from
 | **app** | Laravel 11 (PHP 8.3) — web UI, API, scraper jobs |
 | **queue** | Processes background jobs (fetches, scoring, AI analysis) |
 | **scheduler** | Runs Laravel's `schedule:work` for periodic data refreshes |
-| **agent** | Python Flask service wrapping Claude Agent SDK for AI review and chat |
+| **agent** | Python Flask service that subprocesses the OpenAI Codex CLI for AI review and chat |
 | **mysql** | MySQL 8.0 data store |
 
 ## Quick start
@@ -78,8 +78,9 @@ cp .env.example .env
 php artisan key:generate  # or set APP_KEY manually
 
 # Required for AI features:
-#   CLAUDE_AGENT_TOKEN        — Anthropic API key
-#   CLAUDE_AGENT_INTERNAL_SECRET — shared secret (openssl rand -hex 32)
+#   AI_AGENT_INTERNAL_SECRET — shared secret (openssl rand -hex 32)
+# On the host, also run once: `codex login` (ChatGPT Pro account).
+# ~/.codex is mounted into the agent container.
 
 # 2. Start everything
 docker compose up -d --build
@@ -116,7 +117,7 @@ All scraping jobs implement `ShouldQueue` and are dispatched by the scheduler:
 |---|---|
 | `nrl:fetch-draw` | Pull fixtures. `--round=7` for specific round, `--all` for all 27 |
 | `nrl:fetch-all` | Run every scraper synchronously (good for bootstrapping) |
-| `nrl:predict` | Score current round (or `nrl:predict 7`). Add `--ai` for Claude AI review |
+| `nrl:predict` | Score current round (or `nrl:predict 7`). Add `--ai` for AI review |
 | `nrl:seed-round` | Seed a hardcoded fixture list (fallback if scraper is down) |
 
 ### Sync flow
@@ -149,7 +150,7 @@ Each match gets a home/away win probability from a stack of differential signals
 
 ### AI review (optional)
 
-When `--ai` is passed or the scheduler fires `DispatchAiAnalysisFanout`, each match is sent to the Python agent service. The Claude agent:
+When `--ai` is passed or the scheduler fires `DispatchAiAnalysisFanout`, each match is sent to the Python agent service. The AI agent:
 
 1. Reads match context, team lists, injuries via tool calls back into Laravel
 2. Reviews the statistical predictions
@@ -183,7 +184,7 @@ Built with **Livewire 3** + **Tailwind CSS**. Dark/light theme toggle.
 | `/match/{id}` | Match detail | Win prediction breakdown with per-team signals, ranked try scorer list with signal bars and descriptions, expandable AI reasoning, injury panels, milestone alerts |
 | `/leaderboard` | Leaderboard | Cross-round try scorer rankings |
 | `/accuracy` | Accuracy | Prediction accuracy tracking |
-| `/chat` | Chat | Conversational Claude AI interface — ask about try scorers, matchups, player stats, injuries |
+| `/chat` | Chat | Conversational AI interface — ask about try scorers, matchups, player stats, injuries |
 | `/jobs` | Jobs | Background job monitoring |
 | `/logs` | Logs | Application log viewer |
 
@@ -234,7 +235,7 @@ Response includes per leg: type, selection, probability, confidence, reasoning, 
 ### Chat
 
 ```
-POST /api/chat                  — Send a message to the Claude AI analyst
+POST /api/chat                  — Send a message to the AI analyst
     { "message": "Who should I pick for anytime try scorer in the Broncos game?",
       "history": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}] }
 ```
@@ -267,18 +268,17 @@ See `.env.example` for full list. Key variables:
 |---|---|---|
 | `APP_KEY` | Yes | Laravel app key (`php artisan key:generate`) |
 | `DB_*` | Yes | MySQL connection (defaults work with docker compose) |
-| `CLAUDE_AGENT_TOKEN` | For AI | Anthropic API key |
-| `CLAUDE_AGENT_INTERNAL_SECRET` | For AI | Shared secret between Laravel and agent service |
-| `CLAUDE_AGENT_MODEL` | No | Model to use (default: `claude-sonnet-4-5`) |
-| `CLAUDE_AGENT_MAX_TURNS` | No | Max agent tool-use turns (default: 12) |
-| `CLAUDE_AGENT_SERVICE_URL` | No | Agent service URL (default: `http://agent:5000`) |
-| `CLAUDE_AGENT_CALLBACK_URL` | No | Laravel URL the agent calls back to (default: `http://app:8000`) |
+| `AI_AGENT_INTERNAL_SECRET` | For AI | Shared secret between Laravel and agent service |
+| `CODEX_MODEL` | No | Codex CLI model (blank = use `~/.codex/config.toml` default) |
+| `CODEX_TIMEOUT_SECONDS` | No | Per-call timeout for `codex exec` (default: 300) |
+| `AI_AGENT_SERVICE_URL` | No | Agent service URL (default: `http://agent:5000`) |
+| `AI_AGENT_CALLBACK_URL` | No | Laravel URL the agent calls back to (default: `http://app:8000`) |
 
 ## Tech stack
 
 - **Backend**: Laravel 11, PHP 8.3
 - **Frontend**: Livewire 3, Tailwind CSS, Vite
-- **AI**: Claude Agent SDK (Python), Anthropic API
+- **AI**: OpenAI Codex CLI (subprocess), authenticated via ChatGPT Pro
 - **Database**: MySQL 8.0
 - **Infrastructure**: Docker Compose (5 services)
 - **Data sources**: nrl.com public JSON endpoints, The Odds API
@@ -299,7 +299,7 @@ app/
 
 python-agent/
 ├── app.py                Flask entrypoint (/analyse, /chat, /health)
-├── agent.py              Claude Agent SDK loops
+├── agent.py              Codex CLI subprocess wrapper
 └── laravel_client.py     HTTP client for callbacks into Laravel
 ```
 
@@ -309,7 +309,7 @@ python-agent/
 
 - `.env` is **gitignored**. Treat the bundled `.env.example` as scaffolding only.
 - Default DB credentials in `docker-compose.yml` (`nrl_secret`, `root_secret`) are for local development. Override `DB_PASSWORD` and `DB_ROOT_PASSWORD` before deploying anywhere reachable from the public internet.
-- `CLAUDE_AGENT_INTERNAL_SECRET` gates the `/api/internal/agent/*` callback surface — generate a fresh value per environment with `openssl rand -hex 32`.
+- `AI_AGENT_INTERNAL_SECRET` gates the `/api/internal/agent/*` callback surface — generate a fresh value per environment with `openssl rand -hex 32`.
 - The public REST API is intentionally unauthenticated for portfolio/demo purposes. Add a token or rate-limiter (`Route::middleware('throttle:60,1')`) before exposing it.
 - Scrapers hit `nrl.com` public JSON endpoints — be a polite citizen and don't crank the schedule intervals down without good reason.
 

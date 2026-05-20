@@ -7,14 +7,15 @@ use App\Models\Article;
 use App\Models\Matchup;
 use App\Models\Player;
 use App\Models\Prediction;
+use App\Models\Round;
 use App\Models\Team;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 /**
- * HTTP surface that the Python Claude Agent service calls into
- * to implement its five tools. Protected by agent.internal middleware.
+ * HTTP surface that the Python AI agent service calls into
+ * to fetch context and submit adjusted predictions. Protected by agent.internal middleware.
  */
 class AgentToolController extends Controller
 {
@@ -120,7 +121,7 @@ class AgentToolController extends Controller
 
     public function currentMatches(): JsonResponse
     {
-        $round = \App\Models\Round::current();
+        $round = Round::current();
         if (! $round) {
             return response()->json(['round' => null, 'matches' => []]);
         }

@@ -1,6 +1,7 @@
-"""Flask entrypoint for the Claude Agent service."""
+"""Flask entrypoint for the AI agent service (OpenAI Codex CLI backend)."""
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 
@@ -15,15 +16,15 @@ app = Flask(__name__)
 
 
 def _require_secret() -> None:
-    expected = os.environ.get("CLAUDE_AGENT_INTERNAL_SECRET", "")
+    expected = os.environ.get("AI_AGENT_INTERNAL_SECRET", "")
     provided = request.headers.get("X-Agent-Secret", "")
-    if not expected or expected != provided:
+    if not expected or not hmac.compare_digest(expected, provided):
         abort(401, description="invalid agent credentials")
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "nrl-claude-agent"}
+    return {"ok": True, "service": "nrl-ai-agent"}
 
 
 @app.post("/analyse")
@@ -37,7 +38,7 @@ def analyse():
     logger.info("analyse start match_id=%s", match_id)
     try:
         result = analyse_match(match_id)
-    except Exception:  # noqa: BLE001 — log and return 500 so Laravel can retry
+    except Exception:  # noqa: BLE001 - log and return 500 so Laravel can retry
         logger.exception("analyse failed match_id=%s", match_id)
         return jsonify({"ok": False, "error": "agent failure"}), 500
 

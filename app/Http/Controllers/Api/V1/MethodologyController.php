@@ -54,8 +54,8 @@ class MethodologyController extends Controller
                 ['name' => 'Live Scores', 'url' => 'nrl.com live data', 'refresh' => 'Every 5 min (when live)'],
             ],
             'ai_review' => [
-                'description' => 'Optional Claude AI review adjusts scores by up to +/-15 points using team lists, injuries, venue history, and news context.',
-                'model' => config('services.claude_agent.model', 'claude-sonnet-4-5'),
+                'description' => 'Optional AI review adjusts scores by up to +/-15 points using team lists, injuries, venue history, and news context.',
+                'model' => env('CODEX_MODEL') ?: 'codex-cli (config default)',
             ],
         ]);
     }

@@ -40,11 +40,9 @@ services:
       QUEUE_CONNECTION: database
       CACHE_STORE: database
       SESSION_DRIVER: database
-      CLAUDE_AGENT_SERVICE_URL: http://agent:5000
-      CLAUDE_AGENT_CALLBACK_URL: http://app:8000
-      CLAUDE_AGENT_INTERNAL_SECRET: ${CLAUDE_AGENT_INTERNAL_SECRET}
-      CLAUDE_AGENT_TOKEN: ${CLAUDE_AGENT_TOKEN}
-      CLAUDE_AGENT_MODEL: ${CLAUDE_AGENT_MODEL:-claude-sonnet-4-5}
+      AI_AGENT_SERVICE_URL: http://agent:5000
+      AI_AGENT_CALLBACK_URL: http://app:8000
+      AI_AGENT_INTERNAL_SECRET: ${AI_AGENT_INTERNAL_SECRET}
       ODDS_API_KEY: ${ODDS_API_KEY}
     ports:
       - "0.0.0.0:8000:8000"
@@ -76,10 +74,9 @@ services:
       QUEUE_CONNECTION: database
       CACHE_STORE: database
       SESSION_DRIVER: database
-      CLAUDE_AGENT_SERVICE_URL: http://agent:5000
-      CLAUDE_AGENT_CALLBACK_URL: http://app:8000
-      CLAUDE_AGENT_INTERNAL_SECRET: ${CLAUDE_AGENT_INTERNAL_SECRET}
-      CLAUDE_AGENT_TOKEN: ${CLAUDE_AGENT_TOKEN}
+      AI_AGENT_SERVICE_URL: http://agent:5000
+      AI_AGENT_CALLBACK_URL: http://app:8000
+      AI_AGENT_INTERNAL_SECRET: ${AI_AGENT_INTERNAL_SECRET}
       ODDS_API_KEY: ${ODDS_API_KEY}
     command: ["php", "artisan", "queue:work", "--tries=3", "--sleep=3"]
 
@@ -106,10 +103,9 @@ services:
       QUEUE_CONNECTION: database
       CACHE_STORE: database
       SESSION_DRIVER: database
-      CLAUDE_AGENT_SERVICE_URL: http://agent:5000
-      CLAUDE_AGENT_CALLBACK_URL: http://app:8000
-      CLAUDE_AGENT_INTERNAL_SECRET: ${CLAUDE_AGENT_INTERNAL_SECRET}
-      CLAUDE_AGENT_TOKEN: ${CLAUDE_AGENT_TOKEN}
+      AI_AGENT_SERVICE_URL: http://agent:5000
+      AI_AGENT_CALLBACK_URL: http://app:8000
+      AI_AGENT_INTERNAL_SECRET: ${AI_AGENT_INTERNAL_SECRET}
       ODDS_API_KEY: ${ODDS_API_KEY}
     command: ["php", "artisan", "schedule:work"]
 
@@ -118,12 +114,13 @@ services:
       context: ./python-agent
     restart: unless-stopped
     environment:
-      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_AGENT_TOKEN}
-      CLAUDE_AGENT_TOKEN: ${CLAUDE_AGENT_TOKEN}
-      CLAUDE_AGENT_MODEL: ${CLAUDE_AGENT_MODEL:-claude-sonnet-4-5}
-      CLAUDE_AGENT_MAX_TURNS: ${CLAUDE_AGENT_MAX_TURNS:-12}
-      CLAUDE_AGENT_INTERNAL_SECRET: ${CLAUDE_AGENT_INTERNAL_SECRET}
-      CLAUDE_AGENT_CALLBACK_URL: http://app:8000
+      CODEX_HOME: /home/agent/.codex
+      CODEX_MODEL: ${CODEX_MODEL:-}
+      CODEX_TIMEOUT_SECONDS: ${CODEX_TIMEOUT_SECONDS:-300}
+      AI_AGENT_INTERNAL_SECRET: ${AI_AGENT_INTERNAL_SECRET}
+      AI_AGENT_CALLBACK_URL: http://app:8000
+    volumes:
+      - ${HOME}/.codex:/home/agent/.codex
     ports:
       - "5055:5000"
 

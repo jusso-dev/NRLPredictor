@@ -15,9 +15,12 @@ return new class extends Migration
             $table->index('odds_api_event_id');
         });
 
-        // Convert market enum to string for flexibility, add point column for spreads/totals
-        // MySQL enum alteration is fragile — safer to convert to varchar.
-        DB::statement("ALTER TABLE odds_snapshots MODIFY market VARCHAR(30) NOT NULL");
+        // Convert market enum to string for flexibility. SQLite stores Laravel
+        // enums as text already, so this MySQL-only alteration is unnecessary
+        // in the in-memory test database.
+        if (DB::getDriverName() === 'mysql') {
+            DB::statement('ALTER TABLE odds_snapshots MODIFY market VARCHAR(30) NOT NULL');
+        }
 
         Schema::table('odds_snapshots', function (Blueprint $table) {
             $table->decimal('point', 6, 2)->nullable()->after('decimal_odds');
@@ -30,7 +33,9 @@ return new class extends Migration
             $table->dropColumn('point');
         });
 
-        DB::statement("ALTER TABLE odds_snapshots MODIFY market ENUM('ats','fts','2plus','match_winner') NOT NULL");
+        if (DB::getDriverName() === 'mysql') {
+            DB::statement("ALTER TABLE odds_snapshots MODIFY market ENUM('ats','fts','2plus','match_winner') NOT NULL");
+        }
 
         Schema::table('matches', function (Blueprint $table) {
             $table->dropIndex(['odds_api_event_id']);

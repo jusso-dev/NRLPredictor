@@ -26,4 +26,5 @@ yarn-error.log
 Thumbs.db
 *.log
 /.claude/
+/.codex/
 /CLAUDE.local.md

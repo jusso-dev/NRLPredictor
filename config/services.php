@@ -39,23 +39,19 @@ return [
         'key' => env('ODDS_API_KEY'),
     ],
 
-    'claude_agent' => [
-        // The long-lived Anthropic token used by the Claude Agent service.
-        // Exposed to the Python Flask container via docker-compose.
-        'token' => env('CLAUDE_AGENT_TOKEN'),
-        'model' => env('CLAUDE_AGENT_MODEL', 'claude-sonnet-4-5'),
-        'max_turns' => (int) env('CLAUDE_AGENT_MAX_TURNS', 12),
-
+    'ai_agent' => [
         // URL of the Python Flask agent service; set per-environment.
-        'service_url' => env('CLAUDE_AGENT_SERVICE_URL', 'http://agent:5000'),
+        // The Python service subprocesses the OpenAI Codex CLI, authenticated
+        // via a host-mounted ChatGPT Pro session at ~/.codex.
+        'service_url' => env('AI_AGENT_SERVICE_URL', 'http://agent:5000'),
 
         // Shared secret the agent uses when calling Laravel callbacks,
         // and that Laravel uses when calling the agent.
-        'internal_secret' => env('CLAUDE_AGENT_INTERNAL_SECRET'),
+        'internal_secret' => env('AI_AGENT_INTERNAL_SECRET'),
 
         // Public base URL the Flask agent uses to reach Laravel
         // (service name + port inside the docker network).
-        'laravel_callback_url' => env('CLAUDE_AGENT_CALLBACK_URL', 'http://app:8000'),
+        'laravel_callback_url' => env('AI_AGENT_CALLBACK_URL', 'http://app:8000'),
     ],
 
 ];

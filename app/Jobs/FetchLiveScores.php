@@ -21,17 +21,24 @@ use Throwable;
  * Fetch live scores and try events from nrl.com's JSON API.
  * Runs every 5 minutes when there are live matches.
  */
-class FetchLiveScores implements ShouldQueue, ShouldBeUnique
+class FetchLiveScores implements ShouldBeUnique, ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels, LogsDataFetch;
+    use Dispatchable, InteractsWithQueue, LogsDataFetch, Queueable, SerializesModels;
 
     public int $timeout = 120;
-    public int $tries = 1;
+
+    public int $tries = 2;
+
     public int $uniqueFor = 240;
 
     public function uniqueId(): string
     {
         return 'fetch:live-scores';
+    }
+
+    public function backoff(): array
+    {
+        return [10];
     }
 
     public function handle(HttpScraper $http): void
@@ -55,6 +62,7 @@ class FetchLiveScores implements ShouldQueue, ShouldBeUnique
             $response = $http->get($url);
             if (! $response->successful()) {
                 $this->completeLog(0);
+
                 return;
             }
 
@@ -129,7 +137,7 @@ class FetchLiveScores implements ShouldQueue, ShouldBeUnique
 
     protected function fetchTryEvents(HttpScraper $http, Matchup $match, string $matchCentreUrl): int
     {
-        $url = 'https://www.nrl.com' . rtrim($matchCentreUrl, '/') . '/data';
+        $url = 'https://www.nrl.com'.rtrim($matchCentreUrl, '/').'/data';
         $response = $http->get($url);
         if (! $response->successful()) {
             return 0;
@@ -163,7 +171,7 @@ class FetchLiveScores implements ShouldQueue, ShouldBeUnique
             foreach (['homeTeam', 'awayTeam'] as $side) {
                 foreach ($data[$side]['players'] ?? [] as $p) {
                     if (($p['playerId'] ?? 0) === $nrlPlayerId) {
-                        $name = trim(($p['firstName'] ?? '') . ' ' . ($p['lastName'] ?? ''));
+                        $name = trim(($p['firstName'] ?? '').' '.($p['lastName'] ?? ''));
                         break 2;
                     }
                 }

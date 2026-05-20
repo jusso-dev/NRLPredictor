@@ -78,3 +78,11 @@ Schedule::job(new BackfillCalibrationGrades)->dailyAt('05:00')->withoutOverlappi
 Schedule::job(new DispatchAiAnalysisFanout)
     ->everyTwoHours()
     ->withoutOverlapping(115);
+
+// Stale-log sweeper: marks any data_fetch_logs stuck in "running" for >15 min
+// as failed. Catches worker kills (container restart, OOM) so the UI and
+// metrics don't show false "in-flight" rows forever.
+Schedule::command('nrl:sweep-stuck-logs')->everyTenMinutes()->withoutOverlapping(5);
+
+// Prune failed_jobs older than 14 days so the table stays small.
+Schedule::command('queue:prune-failed --hours=336')->dailyAt('03:00');

@@ -24,17 +24,24 @@ use Throwable;
  * for completed matches. This populates the try_events table (needed
  * for accuracy tracking) and updates player season stats.
  */
-class FetchMatchResults implements ShouldQueue, ShouldBeUnique
+class FetchMatchResults implements ShouldBeUnique, ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels, LogsDataFetch;
+    use Dispatchable, InteractsWithQueue, LogsDataFetch, Queueable, SerializesModels;
 
     public int $timeout = 600;
-    public int $tries = 1;
+
+    public int $tries = 2;
+
     public int $uniqueFor = 900;
 
     public function uniqueId(): string
     {
         return 'fetch:match-results';
+    }
+
+    public function backoff(): array
+    {
+        return [30];
     }
 
     public function handle(HttpScraper $http): void
@@ -58,6 +65,7 @@ class FetchMatchResults implements ShouldQueue, ShouldBeUnique
             $drawResponse = $http->get($drawUrl);
             if (! $drawResponse->successful()) {
                 $this->completeLog(0);
+
                 return;
             }
 
@@ -102,7 +110,7 @@ class FetchMatchResults implements ShouldQueue, ShouldBeUnique
         }
 
         // Fetch match centre JSON
-        $url = 'https://www.nrl.com' . rtrim($matchCentreUrl, '/') . '/data';
+        $url = 'https://www.nrl.com'.rtrim($matchCentreUrl, '/').'/data';
         $response = $http->get($url);
         if (! $response->successful()) {
             return 0;
@@ -292,6 +300,7 @@ class FetchMatchResults implements ShouldQueue, ShouldBeUnique
             'tigers' => 'wests-tigers',
             'eagles' => 'sea-eagles',
         ];
+
         return $aliases[$slug] ?? $slug;
     }
 
@@ -305,7 +314,7 @@ class FetchMatchResults implements ShouldQueue, ShouldBeUnique
             $players = $matchData[$side]['players'] ?? [];
             foreach ($players as $p) {
                 if (($p['playerId'] ?? 0) === $nrlPlayerId) {
-                    $name = trim(($p['firstName'] ?? '') . ' ' . ($p['lastName'] ?? ''));
+                    $name = trim(($p['firstName'] ?? '').' '.($p['lastName'] ?? ''));
                     break 2;
                 }
             }
@@ -352,7 +361,7 @@ class FetchMatchResults implements ShouldQueue, ShouldBeUnique
             $players = $matchData[$side]['players'] ?? [];
 
             foreach ($players as $p) {
-                $name = trim(($p['firstName'] ?? '') . ' ' . ($p['lastName'] ?? ''));
+                $name = trim(($p['firstName'] ?? '').' '.($p['lastName'] ?? ''));
                 if (! $name) {
                     continue;
                 }
@@ -397,7 +406,7 @@ class FetchMatchResults implements ShouldQueue, ShouldBeUnique
         foreach (['homeTeam', 'awayTeam'] as $side) {
             $players = $matchData[$side]['players'] ?? [];
             foreach ($players as $p) {
-                $name = trim(($p['firstName'] ?? '') . ' ' . ($p['lastName'] ?? ''));
+                $name = trim(($p['firstName'] ?? '').' '.($p['lastName'] ?? ''));
                 if (! $name) {
                     continue;
                 }

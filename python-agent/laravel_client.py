@@ -9,10 +9,10 @@ import httpx
 
 class LaravelClient:
     def __init__(self) -> None:
-        base = os.environ.get("CLAUDE_AGENT_CALLBACK_URL", "http://app:8000").rstrip("/")
-        secret = os.environ.get("CLAUDE_AGENT_INTERNAL_SECRET", "")
+        base = os.environ.get("AI_AGENT_CALLBACK_URL", "http://app:8000").rstrip("/")
+        secret = os.environ.get("AI_AGENT_INTERNAL_SECRET", "")
         if not secret:
-            raise RuntimeError("CLAUDE_AGENT_INTERNAL_SECRET must be set")
+            raise RuntimeError("AI_AGENT_INTERNAL_SECRET must be set")
         self.base = f"{base}/api/internal/agent"
         self.headers = {"X-Agent-Secret": secret, "Accept": "application/json"}
         self.client = httpx.Client(headers=self.headers, timeout=30.0)
