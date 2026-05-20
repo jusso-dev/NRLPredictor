@@ -156,7 +156,7 @@
             <div class="border-t border-ink-700 pt-4">
                 <div class="font-medium text-bone-50">AI Review (Optional)</div>
                 <div class="mt-1 text-sm text-bone-300">
-                    When enabled, Claude AI reviews the statistical predictions using all available context:
+                    When enabled, an AI analyst reviews the statistical predictions using all available context:
                     team lists, injuries, venue history, recent news articles, and coaching commentary.
                     It can adjust scores by up to +/-15 points and adds written reasoning explaining
                     compound advantages or contradictions the model can't capture.

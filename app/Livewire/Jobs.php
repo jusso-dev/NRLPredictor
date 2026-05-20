@@ -4,13 +4,13 @@ namespace App\Livewire;
 
 use App\Jobs\DispatchAiAnalysisFanout;
 use App\Jobs\FetchDraw;
-use App\Jobs\SyncCurrentRoundData;
 use App\Jobs\FetchInjuryUpdates;
 use App\Jobs\FetchLiveScores;
 use App\Jobs\FetchNrlArticles;
 use App\Jobs\FetchPlayerStats;
 use App\Jobs\FetchTeamLists;
 use App\Jobs\RunPredictionAnalysis;
+use App\Jobs\SyncCurrentRoundData;
 use App\Models\DataFetchLog;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -63,7 +63,7 @@ class Jobs extends Component
         'ai_review' => [
             'label' => 'AI review (fanout)',
             'class' => DispatchAiAnalysisFanout::class,
-            'description' => 'Queue one Claude agent pass per upcoming match. Slow (~1–2 min per match, in parallel).',
+            'description' => 'Queue one AI agent pass per upcoming match. Slow (~1–2 min per match, in parallel).',
         ],
     ];
 
@@ -74,7 +74,9 @@ class Jobs extends Component
 
     public function run(string $key): void
     {
-        if (! isset($this->jobs[$key])) return;
+        if (! isset($this->jobs[$key])) {
+            return;
+        }
 
         $jobClass = $this->jobs[$key]['class'];
 
@@ -86,10 +88,11 @@ class Jobs extends Component
             ->exists();
         if ($running) {
             $this->justDispatched = $this->jobs[$key]['label'].' — already running, skipped';
+
             return;
         }
 
-        dispatch(new $jobClass());
+        dispatch(new $jobClass);
         $this->justDispatched = 'Queued: '.$this->jobs[$key]['label'];
     }
 
@@ -113,6 +116,7 @@ class Jobs extends Component
                 'completed_at' => now(),
             ]);
         $this->justDispatched = $count ? "Cleared {$count} stuck job(s)" : 'No stuck jobs found';
+
         return $count;
     }
 

@@ -22,17 +22,24 @@ use Throwable;
  * Scheduled to run every 5 minutes, but only does work when there's a match
  * kicking off within the next 45 minutes.
  */
-class FetchPreGameNews implements ShouldQueue, ShouldBeUnique
+class FetchPreGameNews implements ShouldBeUnique, ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels, LogsDataFetch;
+    use Dispatchable, InteractsWithQueue, LogsDataFetch, Queueable, SerializesModels;
 
     public int $timeout = 300;
-    public int $tries = 1;
+
+    public int $tries = 2;
+
     public int $uniqueFor = 240;
 
     public function uniqueId(): string
     {
         return 'fetch:pre-game-news';
+    }
+
+    public function backoff(): array
+    {
+        return [30];
     }
 
     public function handle(HttpScraper $http): void
@@ -97,9 +104,11 @@ class FetchPreGameNews implements ShouldQueue, ShouldBeUnique
     {
         try {
             dispatch_sync(new FetchTeamLists);
+
             return 1;
         } catch (Throwable $e) {
             Log::warning("PreGameNews: team list refresh failed: {$e->getMessage()}");
+
             return 0;
         }
     }
@@ -108,9 +117,11 @@ class FetchPreGameNews implements ShouldQueue, ShouldBeUnique
     {
         try {
             dispatch_sync(new FetchInjuryUpdates);
+
             return 1;
         } catch (Throwable $e) {
             Log::warning("PreGameNews: injury refresh failed: {$e->getMessage()}");
+
             return 0;
         }
     }
@@ -121,9 +132,11 @@ class FetchPreGameNews implements ShouldQueue, ShouldBeUnique
         // critical path for re-scoring — dispatch async so we don't blow the 5-min cadence.
         try {
             dispatch(new FetchNrlArticles);
+
             return 1;
         } catch (Throwable $e) {
             Log::warning("PreGameNews: article refresh dispatch failed: {$e->getMessage()}");
+
             return 0;
         }
     }

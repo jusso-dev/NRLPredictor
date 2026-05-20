@@ -15,19 +15,27 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * One Claude-agent pass for one match. Skips early (logged, not failed)
+ * One AI-agent pass for one match. Skips early (logged, not failed)
  * if the match has no statistical predictions — there'd be nothing for
- * the agent's submit_adjusted_prediction tool to update.
+ * the agent's submit_adjusted_prediction endpoint to update.
  */
-class AnalyseMatchWithAi implements ShouldQueue, ShouldBeUnique
+class AnalyseMatchWithAi implements ShouldBeUnique, ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels, LogsDataFetch;
+    use Dispatchable, InteractsWithQueue, LogsDataFetch, Queueable, SerializesModels;
 
     public int $timeout = 420;
-    public int $tries = 1;
+
+    public int $tries = 2;
+
     public int $uniqueFor = 600;
 
     public function __construct(public int $matchId) {}
+
+    /** Single retry delay (seconds). Covers transient agent/network blips. */
+    public function backoff(): array
+    {
+        return [30];
+    }
 
     public function uniqueId(): string
     {
@@ -36,7 +44,7 @@ class AnalyseMatchWithAi implements ShouldQueue, ShouldBeUnique
 
     public function handle(TryPredictionAgent $agent): void
     {
-        $this->startLog('claude.agent:match:'.$this->matchId);
+        $this->startLog('ai.agent:match:'.$this->matchId);
 
         try {
             $match = Matchup::with(['homeTeam', 'awayTeam'])
@@ -50,6 +58,7 @@ class AnalyseMatchWithAi implements ShouldQueue, ShouldBeUnique
                     'error' => "Match {$this->matchId} not found.",
                     'completed_at' => now(),
                 ]);
+
                 return;
             }
 
@@ -67,6 +76,7 @@ class AnalyseMatchWithAi implements ShouldQueue, ShouldBeUnique
                     'error' => $msg,
                     'completed_at' => now(),
                 ]);
+
                 return;
             }
 
@@ -83,6 +93,7 @@ class AnalyseMatchWithAi implements ShouldQueue, ShouldBeUnique
                     'error' => $msg,
                     'completed_at' => now(),
                 ]);
+
                 return;
             }
 

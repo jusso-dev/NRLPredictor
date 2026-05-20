@@ -10,8 +10,9 @@ use Illuminate\Console\Command;
 
 class PredictRoundCommand extends Command
 {
-    protected $signature = 'nrl:predict {round? : Round number; defaults to the current round} {--ai : Also queue Claude AI review per match}';
-    protected $description = 'Score every match in a round (fast). Pass --ai to queue Claude AI review too.';
+    protected $signature = 'nrl:predict {round? : Round number; defaults to the current round} {--ai : Also queue AI review per match}';
+
+    protected $description = 'Score every match in a round (fast). Pass --ai to queue AI review too.';
 
     public function handle(): int
     {
@@ -23,6 +24,7 @@ class PredictRoundCommand extends Command
 
         if (! $round) {
             $this->error('Round not found.');
+
             return self::FAILURE;
         }
 
@@ -40,6 +42,7 @@ class PredictRoundCommand extends Command
         }
 
         $this->info('Done.');
+
         return self::SUCCESS;
     }
 }

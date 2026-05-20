@@ -31,16 +31,25 @@ use Throwable;
  *
  * Costs ~3 credits for match odds + 1 per event for player props.
  */
-class FetchOdds implements ShouldQueue, ShouldBeUnique
+class FetchOdds implements ShouldBeUnique, ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels, LogsDataFetch;
+    use Dispatchable, InteractsWithQueue, LogsDataFetch, Queueable, SerializesModels;
 
     public int $timeout = 300;
-    public int $tries = 1;
+
+    public int $tries = 2;
+
     public int $uniqueFor = 600;
 
+    public function backoff(): array
+    {
+        return [30];
+    }
+
     protected const SPORT_KEY = 'rugbyleague_nrl';
+
     protected const BASE_URL = 'https://api.the-odds-api.com/v4';
+
     protected const REGION = 'au';
 
     public function __construct(
@@ -57,6 +66,7 @@ class FetchOdds implements ShouldQueue, ShouldBeUnique
         $apiKey = config('services.odds_api.key');
         if (! $apiKey) {
             Log::warning('FetchOdds: ODDS_API_KEY not configured, skipping.');
+
             return;
         }
 
@@ -68,6 +78,7 @@ class FetchOdds implements ShouldQueue, ShouldBeUnique
             $events = $this->fetchEvents($apiKey);
             if ($events->isEmpty()) {
                 $this->completeLog(0);
+
                 return;
             }
 
@@ -93,12 +104,13 @@ class FetchOdds implements ShouldQueue, ShouldBeUnique
      */
     protected function fetchEvents(string $apiKey): Collection
     {
-        $response = Http::timeout(30)->get(self::BASE_URL . '/sports/' . self::SPORT_KEY . '/events', [
+        $response = Http::timeout(30)->get(self::BASE_URL.'/sports/'.self::SPORT_KEY.'/events', [
             'apiKey' => $apiKey,
         ]);
 
         if (! $response->successful()) {
-            Log::warning('FetchOdds: events endpoint returned ' . $response->status());
+            Log::warning('FetchOdds: events endpoint returned '.$response->status());
+
             return collect();
         }
 
@@ -123,10 +135,11 @@ class FetchOdds implements ShouldQueue, ShouldBeUnique
             $awayTeam = $this->resolveTeam($event['away_team'] ?? '');
 
             if (! $homeTeam || ! $awayTeam) {
-                Log::debug("FetchOdds: could not resolve teams for event", [
+                Log::debug('FetchOdds: could not resolve teams for event', [
                     'home' => $event['home_team'] ?? null,
                     'away' => $event['away_team'] ?? null,
                 ]);
+
                 continue;
             }
 
@@ -138,8 +151,10 @@ class FetchOdds implements ShouldQueue, ShouldBeUnique
                 // If we have kickoff times, verify they're within 24h of each other
                 if ($m->kickoff_at && isset($event['commence_time'])) {
                     $eventTime = Carbon::parse($event['commence_time']);
+
                     return abs($m->kickoff_at->diffInHours($eventTime)) < 24;
                 }
+
                 return true;
             });
 
@@ -155,7 +170,7 @@ class FetchOdds implements ShouldQueue, ShouldBeUnique
      */
     protected function fetchMatchOdds(string $apiKey): int
     {
-        $response = Http::timeout(30)->get(self::BASE_URL . '/sports/' . self::SPORT_KEY . '/odds', [
+        $response = Http::timeout(30)->get(self::BASE_URL.'/sports/'.self::SPORT_KEY.'/odds', [
             'apiKey' => $apiKey,
             'regions' => self::REGION,
             'markets' => 'h2h,spreads,totals',
@@ -163,7 +178,8 @@ class FetchOdds implements ShouldQueue, ShouldBeUnique
         ]);
 
         if (! $response->successful()) {
-            Log::warning('FetchOdds: odds endpoint returned ' . $response->status());
+            Log::warning('FetchOdds: odds endpoint returned '.$response->status());
+
             return 0;
         }
 
@@ -284,7 +300,7 @@ class FetchOdds implements ShouldQueue, ShouldBeUnique
 
         foreach ($matches as $match) {
             $response = Http::timeout(30)->get(
-                self::BASE_URL . '/sports/' . self::SPORT_KEY . '/events/' . $match->odds_api_event_id . '/odds',
+                self::BASE_URL.'/sports/'.self::SPORT_KEY.'/events/'.$match->odds_api_event_id.'/odds',
                 [
                     'apiKey' => $apiKey,
                     'regions' => self::REGION,
@@ -297,6 +313,7 @@ class FetchOdds implements ShouldQueue, ShouldBeUnique
                 Log::debug("FetchOdds: player odds failed for event {$match->odds_api_event_id}", [
                     'status' => $response->status(),
                 ]);
+
                 continue;
             }
 
@@ -395,6 +412,7 @@ class FetchOdds implements ShouldQueue, ShouldBeUnique
 
         // Last resort: extract the last word (nickname) and slug-match
         $nickname = Str::afterLast($name, ' ');
+
         return Team::where('nrl_slug', Str::slug($nickname))->first();
     }
 

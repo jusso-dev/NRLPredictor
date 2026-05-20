@@ -6,7 +6,6 @@ use App\Models\Matchup;
 use App\Models\Prediction;
 use App\Models\Round;
 use App\Models\SignalPerformanceLog;
-use App\Models\TryEvent;
 use App\Models\WeightAdjustment;
 use Illuminate\Support\Facades\Log;
 
@@ -18,12 +17,13 @@ use Illuminate\Support\Facades\Log;
  * 2. Measure which signals were stronger in hits vs misses (delta)
  * 3. Adjust weights: boost signals with positive delta, dampen negative
  * 4. Persist the new weights to config and log the reasoning
- * 5. Generate an updated prompt insight for the Claude agent
+ * 5. Generate an updated prompt insight for the AI agent
  */
 class SignalTuner
 {
     // Never let a weight go below this or above this
     protected const MIN_WEIGHT = 1;
+
     protected const MAX_WEIGHT = 30;
 
     // Maximum adjustment per round (prevents wild swings from small samples)
@@ -59,7 +59,7 @@ class SignalTuner
         // Step 4: Compute weight adjustments. Start from the current live weights
         // (which may already include prior tuned adjustments from the DB), not just
         // the baked-in config — otherwise each tune resets to the defaults.
-        $currentWeights = (new SignalCalculator())->weights();
+        $currentWeights = (new SignalCalculator)->weights();
         $newWeights = $this->adjustWeights($currentWeights, $cumulativeDeltas);
 
         // Step 5: Compute accuracy metrics
@@ -86,7 +86,7 @@ class SignalTuner
         // Step 8: Generate agent prompt insights
         $insights = $this->generateInsights($cumulativeDeltas, $signalStats, $accuracyBefore, $calibration);
 
-        Log::info("SignalTuner: tuned after R{$roundNumber}. Accuracy={$accuracyBefore}%. " . count($newWeights) . ' weights adjusted. ' . ($calibration['summary'] ?? ''));
+        Log::info("SignalTuner: tuned after R{$roundNumber}. Accuracy={$accuracyBefore}%. ".count($newWeights).' weights adjusted. '.($calibration['summary'] ?? ''));
 
         return [
             'round' => $roundNumber,
@@ -283,6 +283,7 @@ class SignalTuner
 
         if (empty($changed)) {
             $lines[] = 'No weight changes — all signals performing within normal range.';
+
             return implode("\n", $lines);
         }
 
@@ -322,7 +323,7 @@ class SignalTuner
     }
 
     /**
-     * Generate insights for the Claude agent prompt.
+     * Generate insights for the AI agent prompt.
      */
     protected function generateInsights(array $deltas, array $roundStats, float $accuracy, array $calibration = []): string
     {

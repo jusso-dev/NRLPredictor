@@ -1,262 +1,310 @@
-"""Claude Agent SDK wrapper for NRL try-scorer prediction adjustment."""
+"""Codex CLI wrapper for NRL try-scorer prediction adjustment.
+
+Subprocesses the OpenAI Codex CLI (`codex exec`) instead of running an agent
+loop. Data is pre-fetched from Laravel and embedded in the prompt; the model
+returns a JSON payload of adjustments which we feed back into Laravel.
+
+Auth: Codex CLI reads `${CODEX_HOME}/auth.json`, mounted from the host where
+`codex login` was run with a ChatGPT Pro account.
+"""
 from __future__ import annotations
 
-import asyncio
 import json
+import logging
 import os
+import re
+import subprocess
+import tempfile
 from typing import Any
-
-from claude_agent_sdk import (
-    AssistantMessage,
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
-    TextBlock,
-    create_sdk_mcp_server,
-    tool,
-)
 
 from laravel_client import LaravelClient
 
-SYSTEM_PROMPT = """You are an NRL betting analyst reviewing try-scorer predictions for matches.
+logger = logging.getLogger("nrl-agent.codex")
 
-## Hard rules
-- NEVER recommend a player not in the final 1-17 team list for the match.
-- NEVER output a recommendation without at least 3 cited signals.
-- If a player's model probability is under 15%, do not recommend them.
-- Include the responsible gambling footer: "For informational use only. Gambling involves real financial risk. If you need support, call 1800 858 858 or visit www.betstop.gov.au."
+CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
+CODEX_MODEL = os.environ.get("CODEX_MODEL", "").strip()
 
-## Workflow
-1. Call get_match_context to understand team lists, injuries, venue, weather, and kickoff.
-2. Call get_top_predictions to see the top 10 statistically-predicted try scorers with signals.
-3. For interesting candidates, call get_player_deep_stats for career, venue, and head-to-head records.
-4. Call get_team_articles for both teams to catch narrative factors (coach comments, tactical changes).
-5. Identify compound advantages where multiple signals stack (hot form + weak opposing edge + milestone).
-6. For each of the top ~8 players, call submit_adjusted_prediction with:
-   - adjusted_score: the statistical score +/- up to 15 points based on contextual factors.
-   - reasoning: 2-3 sentences citing specific stats and numbers.
 
-## Analytical style
-- Reason from the numbers, not from reputation.
-- Bring up compound advantages where multiple signals stack.
-- Mention WHY something is a risk, not just a strength. Acknowledge uncertainty.
-- Write in plain Australian English. No hype, no exclamation marks.
-- Do not use em-dashes, emojis, or filler phrases.
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except ValueError:
+        logger.warning("invalid integer env %s=%r; using %d", name, os.environ.get(name), default)
+        return default
+
+
+CODEX_TIMEOUT = _int_env("CODEX_TIMEOUT_SECONDS", 300)
+TOP_N_FOR_DEEP_STATS = _int_env("CODEX_TOP_N_DEEP", 6)
+
+ANALYSIS_SYSTEM = """You are an NRL betting analyst reviewing try-scorer predictions.
+
+Hard rules:
+- Never recommend a player not in the final 1-17 team list for the match.
+- Never output an adjustment without at least 3 cited signals.
+- If a player's model probability is under 15%, do not adjust upward.
+- Adjusted score must be 0-100 and within +/-15 of the original statistical score.
+
+Analytical style:
+- Reason from numbers, not reputation.
+- Identify compound advantages where multiple signals stack.
+- Acknowledge uncertainty. Mention why something is a risk, not just a strength.
+- Plain Australian English. No hype, no emojis, no em-dashes, no exclamation marks.
 - Favour wingers and fullbacks facing disrupted defensive edges.
 - Penalise predictions that depend on signals contradicted by news.
+
+Output:
+Respond with a single JSON object matching the supplied schema. Include 5-8
+players from the supplied top_predictions list, ordered by your conviction.
 """
 
+CHAT_SYSTEM = """You are an NRL rugby league analyst. You have live data embedded below.
 
-def build_tools(client: LaravelClient):
-    """Define the 5 tools the agent can call, closing over one LaravelClient per request."""
+Rules:
+- Cite specific numbers and stats.
+- Be conversational but data-driven.
+- Use bullet points for lists of players/stats.
+- Keep responses concise but thorough.
+- Plain Australian English, no hype, no emojis.
+"""
 
-    @tool(
-        "get_match_context",
-        "Returns team lists, injuries, venue, kickoff and recent form for a match.",
-        {"match_id": int},
-    )
-    async def get_match_context(args: dict[str, Any]):
-        data = client.match_context(int(args["match_id"]))
-        return {"content": [{"type": "text", "text": json.dumps(data)}]}
+ANALYSIS_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["adjustments"],
+    "properties": {
+        "adjustments": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["player_id", "adjusted_score", "reasoning"],
+                "properties": {
+                    "player_id": {"type": "integer"},
+                    "adjusted_score": {"type": "integer", "minimum": 0, "maximum": 100},
+                    "reasoning": {"type": "string", "minLength": 10},
+                },
+            },
+        }
+    },
+}
 
-    @tool(
-        "get_top_predictions",
-        "Returns the top 10 statistically-predicted try scorers for a match with their signals.",
-        {"match_id": int},
-    )
-    async def get_top_predictions(args: dict[str, Any]):
-        data = client.top_predictions(int(args["match_id"]))
-        return {"content": [{"type": "text", "text": json.dumps(data)}]}
 
-    @tool(
-        "get_player_deep_stats",
-        "Returns career stats, opponent records and venue records for a player.",
-        {"player_id": int},
-    )
-    async def get_player_deep_stats(args: dict[str, Any]):
-        data = client.player_deep_stats(int(args["player_id"]))
-        return {"content": [{"type": "text", "text": json.dumps(data)}]}
+def _run_codex(prompt: str, output_schema: dict[str, Any] | None = None) -> str:
+    """Invoke `codex exec`, return the final assistant message text."""
+    with tempfile.TemporaryDirectory() as tmp:
+        last_msg_path = os.path.join(tmp, "out.txt")
+        schema_path: str | None = None
+        if output_schema is not None:
+            schema_path = os.path.join(tmp, "schema.json")
+            with open(schema_path, "w", encoding="utf-8") as fh:
+                json.dump(output_schema, fh)
 
-    @tool(
-        "get_team_articles",
-        "Returns recent NRL.com articles tagged with the given team.",
-        {"team_id": int},
-    )
-    async def get_team_articles(args: dict[str, Any]):
-        data = client.team_articles(int(args["team_id"]))
-        return {"content": [{"type": "text", "text": json.dumps(data)}]}
+        cmd = [
+            CODEX_BIN,
+            "exec",
+            "--sandbox", "read-only",
+            "--skip-git-repo-check",
+            "--ephemeral",
+            "--color", "never",
+            "--output-last-message", last_msg_path,
+        ]
+        if CODEX_MODEL:
+            cmd.extend(["--model", CODEX_MODEL])
+        if schema_path:
+            cmd.extend(["--output-schema", schema_path])
+        cmd.append("-")  # read prompt from stdin
 
-    @tool(
-        "submit_adjusted_prediction",
-        "Updates a prediction record with an AI-adjusted score (0-100) and reasoning text.",
-        {"match_id": int, "player_id": int, "adjusted_score": int, "reasoning": str},
-    )
-    async def submit_adjusted_prediction(args: dict[str, Any]):
-        data = client.submit_adjusted_prediction(
-            int(args["match_id"]),
-            int(args["player_id"]),
-            int(args["adjusted_score"]),
-            str(args["reasoning"]),
+        logger.info(
+            "codex exec model=%s schema=%s prompt_chars=%d",
+            CODEX_MODEL or "<config default>",
+            bool(schema_path),
+            len(prompt),
         )
-        return {"content": [{"type": "text", "text": json.dumps(data)}]}
-
-    return [
-        get_match_context,
-        get_top_predictions,
-        get_player_deep_stats,
-        get_team_articles,
-        submit_adjusted_prediction,
-    ]
-
-
-async def _run(match_id: int) -> dict[str, Any]:
-    laravel = LaravelClient()
-    tools = build_tools(laravel)
-    server = create_sdk_mcp_server(name="nrl-tools", version="1.0.0", tools=tools)
-
-    tool_names = [
-        "mcp__nrl-tools__get_match_context",
-        "mcp__nrl-tools__get_top_predictions",
-        "mcp__nrl-tools__get_player_deep_stats",
-        "mcp__nrl-tools__get_team_articles",
-        "mcp__nrl-tools__submit_adjusted_prediction",
-    ]
-
-    options = ClaudeAgentOptions(
-        system_prompt=SYSTEM_PROMPT,
-        mcp_servers={"nrl-tools": server},
-        allowed_tools=tool_names,
-        model=os.environ.get("CLAUDE_AGENT_MODEL", "claude-sonnet-4-5"),
-        max_turns=int(os.environ.get("CLAUDE_AGENT_MAX_TURNS", "12")),
-        permission_mode="acceptEdits",
-    )
-
-    transcript: list[str] = []
-    async with ClaudeSDKClient(options=options) as agent:
-        await agent.query(
-            f"Review and adjust try-scorer predictions for match ID {match_id}. "
-            "Use the tools, then submit adjusted predictions for the top scorers."
+        proc = subprocess.run(
+            cmd,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=CODEX_TIMEOUT,
+            env={**os.environ},
         )
-        async for message in agent.receive_response():
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        transcript.append(block.text)
+        if proc.returncode != 0:
+            logger.error("codex exit=%d stderr=%s", proc.returncode, proc.stderr[:500])
+            raise RuntimeError(f"codex failed: {proc.stderr[:300]}")
 
-    return {
-        "match_id": match_id,
-        "transcript": "\n".join(transcript)[:4000],
-    }
+        try:
+            with open(last_msg_path, encoding="utf-8") as fh:
+                return fh.read()
+        except FileNotFoundError:
+            logger.warning("codex did not write last-message file; falling back to stdout")
+            return proc.stdout
+
+
+def _extract_json(text: str) -> dict[str, Any]:
+    """Find the first balanced JSON object in text and parse it."""
+    cleaned = text.strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
+    if fenced:
+        return json.loads(fenced.group(1))
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start >= 0 and end > start:
+        return json.loads(cleaned[start : end + 1])
+    raise ValueError("no JSON object found in Codex output")
+
+
+def _build_analysis_prompt(match_id: int, payload: dict[str, Any]) -> str:
+    return (
+        ANALYSIS_SYSTEM
+        + "\n\n## Match data\n"
+        + f"match_id: {match_id}\n\n"
+        + "```json\n"
+        + json.dumps(payload, indent=2, default=str)
+        + "\n```\n\n"
+        + "Return the JSON object matching the output schema."
+    )
 
 
 def analyse_match(match_id: int) -> dict[str, Any]:
-    return asyncio.run(_run(match_id))
-
-
-CHAT_SYSTEM_PROMPT = """You are an NRL rugby league analyst assistant. You have access to live match data,
-player stats, predictions, and team news via the tools below.
-
-When the user asks about try scorers, match predictions, player form, injuries, or any NRL data:
-1. Use get_match_context and get_top_predictions for match-specific questions.
-2. Use get_player_deep_stats for player-specific questions.
-3. Use get_team_articles for team news and narrative context.
-
-Always cite specific numbers and stats. Be conversational but data-driven.
-Format your response with clear structure — use bullet points for lists of players/stats.
-Keep responses concise but thorough.
-"""
-
-
-async def _chat(message: str, history: list[dict[str, str]]) -> str:
     laravel = LaravelClient()
 
-    # Build tools — same as analysis but without submit
-    @tool(
-        "get_match_context",
-        "Returns team lists, injuries, venue, kickoff and recent form for a match.",
-        {"match_id": int},
-    )
-    async def get_match_context(args: dict[str, Any]):
-        data = laravel.match_context(int(args["match_id"]))
-        return {"content": [{"type": "text", "text": json.dumps(data)}]}
+    context = laravel.match_context(match_id)
+    top = laravel.top_predictions(match_id)
 
-    @tool(
-        "get_top_predictions",
-        "Returns the top 10 statistically-predicted try scorers for a match with their signals.",
-        {"match_id": int},
-    )
-    async def get_top_predictions(args: dict[str, Any]):
-        data = laravel.top_predictions(int(args["match_id"]))
-        return {"content": [{"type": "text", "text": json.dumps(data)}]}
+    top_list = top.get("predictions") if isinstance(top, dict) else top
+    if not isinstance(top_list, list):
+        top_list = []
+    original_scores = {
+        int(entry["player_id"]): float(entry.get("score", 0))
+        for entry in top_list
+        if isinstance(entry, dict) and isinstance(entry.get("player_id"), int)
+    }
 
-    @tool(
-        "get_player_deep_stats",
-        "Returns career stats, opponent records and venue records for a player.",
-        {"player_id": int},
-    )
-    async def get_player_deep_stats(args: dict[str, Any]):
-        data = laravel.player_deep_stats(int(args["player_id"]))
-        return {"content": [{"type": "text", "text": json.dumps(data)}]}
+    deep_stats: dict[int, Any] = {}
+    for entry in top_list[:TOP_N_FOR_DEEP_STATS]:
+        if not isinstance(entry, dict):
+            continue
+        pid = entry.get("player_id")
+        if isinstance(pid, int):
+            try:
+                deep_stats[pid] = laravel.player_deep_stats(pid)
+            except Exception:
+                logger.exception("deep stats fetch failed pid=%s", pid)
 
-    @tool(
-        "get_team_articles",
-        "Returns recent NRL.com articles tagged with the given team.",
-        {"team_id": int},
-    )
-    async def get_team_articles(args: dict[str, Any]):
-        data = laravel.team_articles(int(args["team_id"]))
-        return {"content": [{"type": "text", "text": json.dumps(data)}]}
+    team_ids = []
+    if isinstance(context, dict):
+        for key in ("home_team_id", "away_team_id"):
+            tid = context.get(key)
+            if isinstance(tid, int):
+                team_ids.append(tid)
+        for key in ("home", "away"):
+            side = context.get(key)
+            if isinstance(side, dict) and isinstance(side.get("team_id"), int):
+                team_ids.append(side["team_id"])
+    team_ids = list(dict.fromkeys(team_ids))
 
-    @tool(
-        "list_current_matches",
-        "Returns all matches in the current round with IDs, teams, and win predictions.",
-        {},
-    )
-    async def list_current_matches(args: dict[str, Any]):
-        data = laravel.current_matches()
-        return {"content": [{"type": "text", "text": json.dumps(data)}]}
+    articles: dict[int, Any] = {}
+    for tid in team_ids:
+        try:
+            articles[tid] = laravel.team_articles(tid)
+        except Exception:
+            logger.exception("articles fetch failed tid=%s", tid)
 
-    chat_tools = [get_match_context, get_top_predictions, get_player_deep_stats, get_team_articles, list_current_matches]
-    server = create_sdk_mcp_server(name="nrl-chat", version="1.0.0", tools=chat_tools)
+    payload = {
+        "match_context": context,
+        "top_predictions": top_list,
+        "player_deep_stats": deep_stats,
+        "team_articles": articles,
+    }
 
-    tool_names = [
-        "mcp__nrl-chat__get_match_context",
-        "mcp__nrl-chat__get_top_predictions",
-        "mcp__nrl-chat__get_player_deep_stats",
-        "mcp__nrl-chat__get_team_articles",
-        "mcp__nrl-chat__list_current_matches",
-    ]
+    prompt = _build_analysis_prompt(match_id, payload)
+    raw_message = _run_codex(prompt, output_schema=ANALYSIS_SCHEMA)
 
-    options = ClaudeAgentOptions(
-        system_prompt=CHAT_SYSTEM_PROMPT,
-        mcp_servers={"nrl-chat": server},
-        allowed_tools=tool_names,
-        model=os.environ.get("CLAUDE_AGENT_MODEL", "claude-sonnet-4-5"),
-        max_turns=int(os.environ.get("CLAUDE_AGENT_MAX_TURNS", "8")),
-        permission_mode="acceptEdits",
-    )
+    try:
+        parsed = _extract_json(raw_message)
+    except (ValueError, json.JSONDecodeError) as exc:
+        logger.error("could not parse Codex JSON: %s\noutput: %s", exc, raw_message[:800])
+        return {"match_id": match_id, "transcript": raw_message[:4000], "submitted": 0}
 
-    transcript: list[str] = []
-    async with ClaudeSDKClient(options=options) as agent:
-        # Build the query with history context
-        context_parts = []
-        for msg in history[-10:]:  # Last 10 messages for context
+    submitted = 0
+    transcript_lines: list[str] = []
+    for adj in parsed.get("adjustments", []):
+        try:
+            pid = int(adj["player_id"])
+            score = max(0, min(100, int(adj["adjusted_score"])))
+            reasoning = str(adj["reasoning"])
+        except (KeyError, TypeError, ValueError):
+            logger.warning("skipping malformed adjustment: %r", adj)
+            continue
+        if pid not in original_scores:
+            logger.warning("skipping adjustment for player outside top predictions: pid=%s", pid)
+            continue
+
+        original = original_scores[pid]
+        score = max(round(original - 15), min(round(original + 15), score))
+        if original < 15 and score > round(original):
+            logger.warning("preventing upward adjustment below 15%% original score: pid=%s", pid)
+            score = round(original)
+
+        try:
+            laravel.submit_adjusted_prediction(match_id, pid, score, reasoning)
+            submitted += 1
+            transcript_lines.append(f"player_id={pid} score={score} :: {reasoning}")
+        except Exception:
+            logger.exception("submit failed match=%s pid=%s", match_id, pid)
+
+    return {
+        "match_id": match_id,
+        "transcript": "\n".join(transcript_lines)[:4000],
+        "submitted": submitted,
+    }
+
+
+def _build_chat_prompt(message: str, history: list[dict[str, str]], data: dict[str, Any]) -> str:
+    history_text = ""
+    if history:
+        rendered = []
+        for msg in history[-10:]:
             role = msg.get("role", "user")
             content = msg.get("content", "")
-            context_parts.append(f"{'User' if role == 'user' else 'Assistant'}: {content}")
+            rendered.append(f"{'User' if role == 'user' else 'Assistant'}: {content}")
+        history_text = "## Previous conversation\n" + "\n".join(rendered) + "\n\n"
 
-        query = message
-        if context_parts:
-            query = "Previous conversation:\n" + "\n".join(context_parts) + "\n\nUser's new message: " + message
-
-        await agent.query(query)
-        async for msg in agent.receive_response():
-            if isinstance(msg, AssistantMessage):
-                for block in msg.content:
-                    if isinstance(block, TextBlock):
-                        transcript.append(block.text)
-
-    return "\n".join(transcript)[:6000]
+    return (
+        CHAT_SYSTEM
+        + "\n\n## Live NRL data\n"
+        + "```json\n"
+        + json.dumps(data, indent=2, default=str)
+        + "\n```\n\n"
+        + history_text
+        + f"## User's new message\n{message}\n"
+    )
 
 
 def chat_query(message: str, history: list[dict[str, str]] | None = None) -> str:
-    return asyncio.run(_chat(message, history or []))
+    laravel = LaravelClient()
+
+    data: dict[str, Any] = {}
+    try:
+        data["current_matches"] = laravel.current_matches()
+    except Exception:
+        logger.exception("current_matches fetch failed")
+
+    match_id_match = re.search(r"\bmatch[\s_-]?id[\s:=]+(\d+)\b", message, re.IGNORECASE)
+    if not match_id_match:
+        match_id_match = re.search(r"\bmatch\s+(\d+)\b", message, re.IGNORECASE)
+    if match_id_match:
+        try:
+            mid = int(match_id_match.group(1))
+            data["focused_match_context"] = laravel.match_context(mid)
+            data["focused_top_predictions"] = laravel.top_predictions(mid)
+        except Exception:
+            logger.exception("focused match fetch failed")
+
+    prompt = _build_chat_prompt(message, history or [], data)
+    return _run_codex(prompt).strip()[:6000]
