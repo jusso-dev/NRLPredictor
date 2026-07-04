@@ -51,23 +51,19 @@ Signal-driven NRL match and try-scorer prediction engine. Scrapes live data from
 │  │  app    │──▶│  queue  │   │ scheduler │   │ mysql │ │
 │  │ Laravel │   │ worker  │   │  cron     │   │  8.0  │ │
 │  │ :8000   │   │         │   │           │   │ :3307 │ │
-│  └────┬────┘   └─────────┘   └───────────┘   └───────┘ │
-│       │                                                  │
-│       │ HTTP (internal)                                  │
-│       ▼                                                  │
-│  ┌──────────┐                                            │
-│  │  agent   │  Python Flask + OpenAI Codex CLI           │
-│  │  :5055   │  AI analysis + chat (ChatGPT Pro auth)     │
-│  └──────────┘                                            │
+│  └─────────┘   └─────────┘   └───────────┘   └───────┘ │
+│                                                          │
+│  app + queue shell out to the OpenAI Codex CLI           │
+│  (`codex exec`) for AI review + chat, using the          │
+│  host's ~/.codex ChatGPT Pro auth mounted read-write     │
 └──────────────────────────────────────────────────────────┘
 ```
 
 | Service | Purpose |
 |---|---|
-| **app** | Laravel 11 (PHP 8.3) — web UI, API, scraper jobs |
-| **queue** | Processes background jobs (fetches, scoring, AI analysis) |
+| **app** | Laravel 11 (PHP 8.3) — web UI, API, chat (Codex CLI in-process) |
+| **queue** | Processes background jobs (fetches, scoring, AI analysis via Codex CLI) |
 | **scheduler** | Runs Laravel's `schedule:work` for periodic data refreshes |
-| **agent** | Python Flask service that subprocesses the OpenAI Codex CLI for AI review and chat |
 | **mysql** | MySQL 8.0 data store |
 
 ## Quick start
@@ -77,10 +73,8 @@ Signal-driven NRL match and try-scorer prediction engine. Scrapes live data from
 cp .env.example .env
 php artisan key:generate  # or set APP_KEY manually
 
-# Required for AI features:
-#   AI_AGENT_INTERNAL_SECRET — shared secret (openssl rand -hex 32)
-# On the host, also run once: `codex login` (ChatGPT Pro account).
-# ~/.codex is mounted into the agent container.
+# Required for AI features: on the host, run once `codex login`
+# (ChatGPT Pro account). ~/.codex is mounted into the app + queue containers.
 
 # 2. Start everything
 docker compose up -d --build
@@ -268,11 +262,8 @@ See `.env.example` for full list. Key variables:
 |---|---|---|
 | `APP_KEY` | Yes | Laravel app key (`php artisan key:generate`) |
 | `DB_*` | Yes | MySQL connection (defaults work with docker compose) |
-| `AI_AGENT_INTERNAL_SECRET` | For AI | Shared secret between Laravel and agent service |
 | `CODEX_MODEL` | No | Codex CLI model (blank = use `~/.codex/config.toml` default) |
 | `CODEX_TIMEOUT_SECONDS` | No | Per-call timeout for `codex exec` (default: 300) |
-| `AI_AGENT_SERVICE_URL` | No | Agent service URL (default: `http://agent:5000`) |
-| `AI_AGENT_CALLBACK_URL` | No | Laravel URL the agent calls back to (default: `http://app:8000`) |
 
 ## Tech stack
 
@@ -280,7 +271,7 @@ See `.env.example` for full list. Key variables:
 - **Frontend**: Livewire 3, Tailwind CSS, Vite
 - **AI**: OpenAI Codex CLI (subprocess), authenticated via ChatGPT Pro
 - **Database**: MySQL 8.0
-- **Infrastructure**: Docker Compose (5 services)
+- **Infrastructure**: Docker Compose (4 services)
 - **Data sources**: nrl.com public JSON endpoints, The Odds API
 
 ## Project layout
@@ -289,18 +280,12 @@ See `.env.example` for full list. Key variables:
 app/
 ├── Console/Commands/     Artisan commands (fetch + predict)
 ├── Http/
-│   ├── Controllers/Api/V1/   Public REST API
-│   ├── Controllers/Internal/ Agent tool callbacks (secret-authenticated)
-│   └── Middleware/           AgentInternalAuth
+│   └── Controllers/Api/V1/   Public REST API
 ├── Jobs/                 Scraper + analysis jobs (queued)
 ├── Livewire/             Dashboard, MatchDetail, Chat, Jobs, Logs, Leaderboard
 ├── Models/               Eloquent models
-└── Services/             SignalCalculator, WinPredictor, MultiBetBuilder, …
-
-python-agent/
-├── app.py                Flask entrypoint (/analyse, /chat, /health)
-├── agent.py              Codex CLI subprocess wrapper
-└── laravel_client.py     HTTP client for callbacks into Laravel
+└── Services/             SignalCalculator, WinPredictor, MultiBetBuilder,
+                          CodexClient, AgentContext, TryPredictionAgent, …
 ```
 
 > One naming quirk: the Eloquent model is **`Matchup`** because `match` is a reserved word in PHP 8.0+. The underlying table is still `matches`.
@@ -309,7 +294,7 @@ python-agent/
 
 - `.env` is **gitignored**. Treat the bundled `.env.example` as scaffolding only.
 - Default DB credentials in `docker-compose.yml` (`nrl_secret`, `root_secret`) are for local development. Override `DB_PASSWORD` and `DB_ROOT_PASSWORD` before deploying anywhere reachable from the public internet.
-- `AI_AGENT_INTERNAL_SECRET` gates the `/api/internal/agent/*` callback surface — generate a fresh value per environment with `openssl rand -hex 32`.
+- `~/.codex/auth.json` holds a ChatGPT refresh token — never commit it or bake it into an image; docker-compose mounts it at runtime.
 - The public REST API is intentionally unauthenticated for portfolio/demo purposes. Add a token or rate-limiter (`Route::middleware('throttle:60,1')`) before exposing it.
 - Scrapers hit `nrl.com` public JSON endpoints — be a polite citizen and don't crank the schedule intervals down without good reason.
 

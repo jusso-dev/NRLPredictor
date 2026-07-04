@@ -9,23 +9,9 @@ use App\Http\Controllers\Api\V1\PredictionController;
 use App\Http\Controllers\Api\V1\RoundController;
 use App\Http\Controllers\Api\V1\TeamController;
 use App\Http\Controllers\ChatController;
-use App\Http\Controllers\Internal\AgentToolController;
 use Illuminate\Support\Facades\Route;
 
-// --- Internal agent API (secret-authenticated) ---
-Route::prefix('internal/agent')
-    ->middleware('agent.internal')
-    ->controller(AgentToolController::class)
-    ->group(function () {
-        Route::get('/match-context/{match}', 'matchContext');
-        Route::get('/top-predictions/{match}', 'topPredictions');
-        Route::get('/player-deep-stats/{player}', 'playerDeepStats');
-        Route::get('/team-articles/{team}', 'teamArticles');
-        Route::get('/current-matches', 'currentMatches');
-        Route::post('/submit-adjusted-prediction', 'submitAdjustedPrediction');
-    });
-
-// --- Chat proxy ---
+// --- Chat (Codex CLI, in-process) ---
 Route::post('/chat', [ChatController::class, 'send']);
 
 // --- Public API v1 ---

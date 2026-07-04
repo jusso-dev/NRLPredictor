@@ -27,7 +27,7 @@ class AnalyseMatchWithAi implements ShouldBeUnique, ShouldQueue
 
     public int $tries = 2;
 
-    public int $uniqueFor = 600;
+    public int $uniqueFor = 900; // > worst case: 2 tries x 420s timeout + backoff
 
     public function __construct(public int $matchId) {}
 
@@ -97,8 +97,8 @@ class AnalyseMatchWithAi implements ShouldBeUnique, ShouldQueue
                 return;
             }
 
-            $agent->analyse($this->matchId);
-            $this->completeLog(1);
+            $applied = $agent->analyse($this->matchId);
+            $this->completeLog($applied);
         } catch (Throwable $e) {
             $this->failLog($e);
             throw $e;

@@ -2,14 +2,34 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Matchup;
+use App\Services\AgentContext;
+use App\Services\CodexClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * Chat endpoint backed by the Codex CLI, run in-process. Pre-fetches
+ * current-round data (plus a specific match if the message references one)
+ * and embeds it in the prompt.
+ */
 class ChatController extends Controller
 {
-    public function send(Request $request): JsonResponse
+    protected const CHAT_SYSTEM = <<<'PROMPT'
+You are an NRL rugby league analyst. You have live data embedded below.
+
+Rules:
+- Cite specific numbers and stats.
+- Be conversational but data-driven.
+- Use bullet points for lists of players/stats.
+- Keep responses concise but thorough.
+- Plain Australian English, no hype, no emojis.
+PROMPT;
+
+    protected const CHAT_TIMEOUT_SECONDS = 120;
+
+    public function send(Request $request, CodexClient $codex, AgentContext $context): JsonResponse
     {
         $data = $request->validate([
             'message' => ['required', 'string', 'max:2000'],
@@ -18,33 +38,53 @@ class ChatController extends Controller
             'history.*.content' => ['required_with:history', 'string'],
         ]);
 
-        $serviceUrl = rtrim((string) config('services.ai_agent.service_url'), '/');
-        $secret = (string) config('services.ai_agent.internal_secret');
-
-        if ($serviceUrl === '' || $secret === '') {
-            return response()->json(['ok' => false, 'error' => 'Chat service not configured'], 503);
-        }
-
         try {
-            $response = Http::timeout(120)
-                ->withHeaders(['X-Agent-Secret' => $secret])
-                ->acceptJson()
-                ->post("{$serviceUrl}/chat", [
-                    'message' => $data['message'],
-                    'history' => $data['history'] ?? [],
-                ]);
+            $embedded = ['current_matches' => $context->currentMatches()];
 
-            if (! $response->successful()) {
-                Log::error('Chat proxy error', ['status' => $response->status(), 'body' => $response->body()]);
-
-                return response()->json(['ok' => false, 'error' => 'Agent service error'], 502);
+            if ($matchId = $this->referencedMatchId($data['message'])) {
+                $match = Matchup::find($matchId);
+                if ($match) {
+                    $embedded['focused_match_context'] = $context->matchContext($match);
+                    $embedded['focused_top_predictions'] = $context->topPredictions($match);
+                }
             }
 
-            return response()->json($response->json());
-        } catch (\Throwable $e) {
-            Log::error('Chat proxy exception', ['message' => $e->getMessage()]);
+            $prompt = $this->buildPrompt($data['message'], $data['history'] ?? [], $embedded);
+            $reply = trim($codex->exec($prompt, null, self::CHAT_TIMEOUT_SECONDS));
 
-            return response()->json(['ok' => false, 'error' => 'Failed to reach agent service'], 502);
+            return response()->json(['ok' => true, 'reply' => substr($reply, 0, 6000)]);
+        } catch (\Throwable $e) {
+            Log::error('Chat failed', ['message' => $e->getMessage()]);
+
+            return response()->json(['ok' => false, 'error' => 'Chat agent failed'], 502);
         }
+    }
+
+    protected function referencedMatchId(string $message): ?int
+    {
+        if (preg_match('/\bmatch[\s_-]?id[\s:=]+(\d+)\b/i', $message, $m)
+            || preg_match('/\bmatch\s+(\d+)\b/i', $message, $m)) {
+            return (int) $m[1];
+        }
+
+        return null;
+    }
+
+    protected function buildPrompt(string $message, array $history, array $embedded): string
+    {
+        $historyText = '';
+        if ($history !== []) {
+            $rendered = collect(array_slice($history, -10))
+                ->map(fn ($msg) => (($msg['role'] ?? 'user') === 'user' ? 'User' : 'Assistant').': '.($msg['content'] ?? ''))
+                ->implode("\n");
+            $historyText = "## Previous conversation\n{$rendered}\n\n";
+        }
+
+        return self::CHAT_SYSTEM
+            ."\n\n## Live NRL data\n```json\n"
+            .json_encode($embedded, JSON_PRETTY_PRINT)
+            ."\n```\n\n"
+            .$historyText
+            ."## User's new message\n{$message}\n";
     }
 }

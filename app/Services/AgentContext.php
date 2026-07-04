@@ -1,29 +1,27 @@
 <?php
 
-namespace App\Http\Controllers\Internal;
+namespace App\Services;
 
-use App\Http\Controllers\Controller;
 use App\Models\Article;
 use App\Models\Matchup;
 use App\Models\Player;
 use App\Models\Prediction;
 use App\Models\Round;
 use App\Models\Team;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 /**
- * HTTP surface that the Python AI agent service calls into
- * to fetch context and submit adjusted predictions. Protected by agent.internal middleware.
+ * Builds the data payloads the AI pass embeds in its Codex prompts.
+ * Previously served over HTTP to the Python agent (AgentToolController);
+ * now consumed in-process by TryPredictionAgent and ChatController.
  */
-class AgentToolController extends Controller
+class AgentContext
 {
-    public function matchContext(Matchup $match): JsonResponse
+    public function matchContext(Matchup $match): array
     {
         $match->load(['homeTeam', 'awayTeam', 'round', 'teamLists.player']);
 
-        return response()->json([
+        return [
             'match_id' => $match->id,
             'round' => $match->round?->round_number,
             'season' => $match->round?->season,
@@ -32,15 +30,15 @@ class AgentToolController extends Controller
             'status' => $match->status,
             'home' => $this->sidePayload($match, $match->home_team_id),
             'away' => $this->sidePayload($match, $match->away_team_id),
-        ]);
+        ];
     }
 
-    public function topPredictions(Matchup $match): JsonResponse
+    public function topPredictions(Matchup $match, int $limit = 10): array
     {
-        $predictions = Prediction::with('player.team')
+        return Prediction::with('player.team')
             ->where('match_id', $match->id)
             ->orderBy('rank_in_match')
-            ->limit(10)
+            ->limit($limit)
             ->get()
             ->map(fn ($p) => [
                 'player_id' => $p->player_id,
@@ -51,18 +49,13 @@ class AgentToolController extends Controller
                 'rank' => $p->rank_in_match,
                 'signals' => $p->signals,
             ])->all();
-
-        return response()->json([
-            'match_id' => $match->id,
-            'predictions' => $predictions,
-        ]);
     }
 
-    public function playerDeepStats(Player $player): JsonResponse
+    public function playerDeepStats(Player $player): array
     {
         $player->load(['team', 'venueStats', 'opponentStats.opponent', 'activeInjury']);
 
-        return response()->json([
+        return [
             'player_id' => $player->id,
             'name' => $player->name,
             'team' => $player->team?->name,
@@ -96,93 +89,55 @@ class AgentToolController extends Controller
                 'tries' => $s->tries,
                 'try_rate' => $s->try_rate,
             ])->all(),
-        ]);
+        ];
     }
 
-    public function teamArticles(Team $team): JsonResponse
+    public function teamArticles(Team $team, int $limit = 5): array
     {
-        $articles = Article::whereJsonContains('team_tags', $team->id)
-            ->orderByDesc('published_at')
-            ->limit(5)
-            ->get()
-            ->map(fn ($a) => [
-                'title' => $a->title,
-                'url' => $a->url,
-                'published_at' => optional($a->published_at)->toIso8601String(),
-                'excerpt' => Str::limit($a->content ?? '', 1500, '...'),
-            ])->all();
-
-        return response()->json([
+        return [
             'team_id' => $team->id,
             'team' => $team->name,
-            'articles' => $articles,
-        ]);
+            'articles' => Article::whereJsonContains('team_tags', $team->id)
+                ->orderByDesc('published_at')
+                ->limit($limit)
+                ->get()
+                ->map(fn ($a) => [
+                    'title' => $a->title,
+                    'url' => $a->url,
+                    'published_at' => optional($a->published_at)->toIso8601String(),
+                    'excerpt' => Str::limit($a->content ?? '', 1500, '...'),
+                ])->all(),
+        ];
     }
 
-    public function currentMatches(): JsonResponse
+    public function currentMatches(): array
     {
         $round = Round::current();
         if (! $round) {
-            return response()->json(['round' => null, 'matches' => []]);
+            return ['round' => null, 'matches' => []];
         }
 
-        $matches = Matchup::with(['homeTeam', 'awayTeam'])
-            ->where('round_id', $round->id)
-            ->orderBy('kickoff_at')
-            ->get()
-            ->map(fn ($m) => [
-                'match_id' => $m->id,
-                'home_team' => $m->homeTeam?->name,
-                'home_team_id' => $m->home_team_id,
-                'away_team' => $m->awayTeam?->name,
-                'away_team_id' => $m->away_team_id,
-                'venue' => $m->venue,
-                'kickoff_at' => optional($m->kickoff_at)->toIso8601String(),
-                'status' => $m->status,
-                'home_win_pct' => $m->home_win_pct,
-                'away_win_pct' => $m->away_win_pct,
-                'predicted_winner_id' => $m->predicted_winner_id,
-            ])->all();
-
-        return response()->json([
+        return [
             'round' => $round->round_number,
             'season' => $round->season,
-            'matches' => $matches,
-        ]);
-    }
-
-    public function submitAdjustedPrediction(Request $request): JsonResponse
-    {
-        $data = $request->validate([
-            'match_id' => ['required', 'integer'],
-            'player_id' => ['required', 'integer'],
-            'adjusted_score' => ['required', 'integer', 'min:0', 'max:100'],
-            'reasoning' => ['required', 'string', 'max:2000'],
-        ]);
-
-        $prediction = Prediction::where('match_id', $data['match_id'])
-            ->where('player_id', $data['player_id'])
-            ->first();
-
-        if (! $prediction) {
-            return response()->json(['error' => 'prediction not found'], 404);
-        }
-
-        $prediction->update([
-            'score' => $data['adjusted_score'],
-            'ai_reasoning' => $data['reasoning'],
-        ]);
-
-        Prediction::where('match_id', $data['match_id'])
-            ->orderByDesc('score')
-            ->get()
-            ->each(fn ($p, $i) => $p->update(['rank_in_match' => $i + 1]));
-
-        return response()->json([
-            'ok' => true,
-            'prediction_id' => $prediction->id,
-            'new_score' => $data['adjusted_score'],
-        ]);
+            'matches' => Matchup::with(['homeTeam', 'awayTeam'])
+                ->where('round_id', $round->id)
+                ->orderBy('kickoff_at')
+                ->get()
+                ->map(fn ($m) => [
+                    'match_id' => $m->id,
+                    'home_team' => $m->homeTeam?->name,
+                    'home_team_id' => $m->home_team_id,
+                    'away_team' => $m->awayTeam?->name,
+                    'away_team_id' => $m->away_team_id,
+                    'venue' => $m->venue,
+                    'kickoff_at' => optional($m->kickoff_at)->toIso8601String(),
+                    'status' => $m->status,
+                    'home_win_pct' => $m->home_win_pct,
+                    'away_win_pct' => $m->away_win_pct,
+                    'predicted_winner_id' => $m->predicted_winner_id,
+                ])->all(),
+        ];
     }
 
     protected function sidePayload(Matchup $match, int $teamId): array

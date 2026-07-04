@@ -1,6 +1,5 @@
 <?php
 
-use App\Http\Middleware\AgentInternalAuth;
 use App\Http\Middleware\RgDisclaimer;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -14,9 +13,6 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        $middleware->alias([
-            'agent.internal' => AgentInternalAuth::class,
-        ]);
         $middleware->appendToGroup('api', [RgDisclaimer::class]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
