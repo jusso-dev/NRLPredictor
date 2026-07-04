@@ -25,7 +25,7 @@ class AutoTuneAfterRound implements ShouldQueue, ShouldBeUnique
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $timeout = 120;
-    public int $uniqueFor = 3600;
+    public int $uniqueFor = 300; // > worst case: 120s timeout; short so a crashed run cannot block the next hourly one
 
     public function uniqueId(): string
     {

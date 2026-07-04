@@ -22,7 +22,7 @@ class FetchNrlArticles implements ShouldQueue, ShouldBeUnique
 
     public int $timeout = 600;
     public int $tries = 1;
-    public int $uniqueFor = 3600;
+    public int $uniqueFor = 660; // > worst case: 1 try x 600s timeout
 
     public function uniqueId(): string
     {

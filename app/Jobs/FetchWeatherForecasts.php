@@ -26,7 +26,7 @@ class FetchWeatherForecasts implements ShouldQueue, ShouldBeUnique
 
     public int $timeout = 120;
     public int $tries = 1;
-    public int $uniqueFor = 3600;
+    public int $uniqueFor = 300; // > worst case: 120s timeout
 
     // Venue → lat/lon mapping for weather lookups
     protected const VENUE_COORDS = [

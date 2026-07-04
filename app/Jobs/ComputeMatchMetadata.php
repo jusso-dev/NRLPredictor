@@ -2,24 +2,31 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\LogsDataFetch;
 use App\Models\MatchTeamList;
 use App\Models\Matchup;
 use App\Models\Round;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Throwable;
 
 /**
  * Compute match-level metadata: turnaround days, interstate travel,
  * and tactical shift detection. Run before prediction scoring.
  */
-class ComputeMatchMetadata implements ShouldQueue
+class ComputeMatchMetadata implements ShouldBeUnique, ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, LogsDataFetch, Queueable, SerializesModels;
 
     public int $timeout = 60;
+
+    public int $tries = 1;
+
+    public int $uniqueFor = 120; // > worst case: 60s timeout
 
     public function handle(): void
     {
@@ -27,6 +34,19 @@ class ComputeMatchMetadata implements ShouldQueue
         if (! $round) {
             return;
         }
+
+        $this->startLog('internal.match-metadata');
+
+        try {
+            $this->compute($round);
+        } catch (Throwable $e) {
+            $this->failLog($e);
+            throw $e;
+        }
+    }
+
+    protected function compute(Round $round): void
+    {
 
         $matches = Matchup::with(['homeTeam', 'awayTeam'])
             ->where('round_id', $round->id)
@@ -64,6 +84,8 @@ class ComputeMatchMetadata implements ShouldQueue
 
             $match->update($updates);
         }
+
+        $this->completeLog($matches->count());
     }
 
     protected function detectTacticalShift(Matchup $match, int $teamId): bool

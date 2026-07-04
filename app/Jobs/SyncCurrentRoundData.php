@@ -24,8 +24,10 @@ use Throwable;
  * finish (team lists depend on the draw being there, scoring depends on
  * team lists, AI depends on predictions).
  *
- * ShouldBeUnique means repeatedly clicking "Sync" only queues one copy —
- * subsequent clicks are dropped until this one finishes.
+ * ShouldBeUnique de-dupes rapid "Sync" clicks while this dispatcher is
+ * queued. It does NOT cover the chain itself — each chained job carries its
+ * own ShouldBeUnique lock, so a second sync while the chain runs just
+ * no-ops job by job.
  */
 class SyncCurrentRoundData implements ShouldQueue, ShouldBeUnique
 {
@@ -33,7 +35,7 @@ class SyncCurrentRoundData implements ShouldQueue, ShouldBeUnique
 
     public int $timeout = 60;
     public int $tries = 1;
-    public int $uniqueFor = 1800; // 30 min
+    public int $uniqueFor = 120; // dispatcher only runs for seconds
 
     public function uniqueId(): string
     {
@@ -52,7 +54,7 @@ class SyncCurrentRoundData implements ShouldQueue, ShouldBeUnique
         $this->startLog('internal.sync');
 
         try {
-            Bus::chain([
+            $jobs = [
                 new FetchDraw($round->season, $round->round_number),
                 new FetchTeamLists,
                 new FetchMatchResults,
@@ -64,10 +66,30 @@ class SyncCurrentRoundData implements ShouldQueue, ShouldBeUnique
                 new ComputeTeamTryDistributions,
                 new RunPredictionAnalysis,
                 new DispatchAiAnalysisFanout,
-            ])->onQueue('default')->dispatch();
+            ];
+
+            Bus::chain($jobs)
+                ->onQueue('default')
+                // Without this, a failed link kills the rest of the chain
+                // silently — the jobs page would show a successful "sync"
+                // with no predictions behind it.
+                ->catch(function (Throwable $e) {
+                    Log::error('SyncCurrentRoundData: chain aborted: '.$e->getMessage());
+                    \App\Models\DataFetchLog::create([
+                        'source' => 'internal.sync.chain',
+                        'job_class' => self::class,
+                        'status' => 'failed',
+                        'error' => 'Chain aborted: '.$e->getMessage(),
+                        'started_at' => now(),
+                        'completed_at' => now(),
+                    ]);
+                })
+                ->dispatch();
 
             Log::info("SyncCurrentRoundData: queued chain for round {$round->round_number}/{$round->season}");
-            $this->completeLog(6);
+            // "Success" here means the chain was queued, not that it finished —
+            // each chained job writes its own log row as it runs.
+            $this->completeLog(count($jobs));
         } catch (Throwable $e) {
             $this->failLog($e);
             throw $e;
