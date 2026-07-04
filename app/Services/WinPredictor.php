@@ -733,13 +733,15 @@ class WinPredictor
     }
 
     /**
-     * Average a numeric stat across a team's last 5 MatchTeamStats rows. Uses
-     * a static cache keyed on team id + callable identity so the four signal
-     * methods don't each hit the database.
+     * Average a numeric stat across a team's last 5 MatchTeamStats rows.
+     * Cached on the instance (NOT `static` — that would live for the whole
+     * queue-worker daemon and serve stale form data for days).
      */
+    protected array $rollingStatsCache = [];
+
     protected function rollingStatRate(int $teamId, \Closure $extractor): ?float
     {
-        static $statsCache = [];
+        $statsCache = &$this->rollingStatsCache;
         if (! isset($statsCache[$teamId])) {
             $statsCache[$teamId] = MatchTeamStats::where('team_id', $teamId)
                 ->whereHas('match', fn ($q) => $q->where('status', 'completed'))
@@ -1025,9 +1027,11 @@ class WinPredictor
     /**
      * Shared cached lookup so the signal methods don't each hit the DB.
      */
+    protected array $recentMatchesCache = [];
+
     protected function recentMatches(int $teamId, int $limit)
     {
-        static $cache = [];
+        $cache = &$this->recentMatchesCache;
         $key = $teamId . ':' . $limit;
         if (! isset($cache[$key])) {
             $cache[$key] = Matchup::where('status', 'completed')

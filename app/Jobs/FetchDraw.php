@@ -45,6 +45,19 @@ class FetchDraw implements ShouldQueue, ShouldBeUnique
         $season = $this->season ?? now()->year;
         $rounds = $this->round ? [$this->round] : $this->detectCurrentRounds($season);
 
+        // Fresh-DB bootstrap returns all 27 rounds — far more scraping than one
+        // job's timeout can hold. Fan out one uniquely-keyed job per round
+        // instead of looping inline.
+        if (count($rounds) > 3) {
+            $this->startLog('nrl.com/draw/data');
+            foreach ($rounds as $roundNumber) {
+                self::dispatch($season, $roundNumber);
+            }
+            $this->completeLog(count($rounds));
+
+            return;
+        }
+
         $this->startLog('nrl.com/draw/data');
         $records = 0;
 
@@ -113,14 +126,17 @@ class FetchDraw implements ShouldQueue, ShouldBeUnique
         $kickoffs = collect($fixtures)
             ->pluck('clock.kickOffTimeLong')
             ->filter()
-            ->map(fn ($t) => Carbon::parse($t, 'Australia/Sydney'));
+            ->map(fn ($t) => $this->parseKickoff($t));
 
+        // Only touch the round dates when the feed actually supplied kickoff
+        // times — overwriting them with NULL breaks Round::current()'s date
+        // window and sends every downstream job to the wrong round.
         $round = Round::updateOrCreate(
             ['season' => $season, 'round_number' => $roundNumber],
-            [
-                'start_date' => $kickoffs->min()?->toDateString(),
-                'end_date' => $kickoffs->max()?->toDateString(),
-            ],
+            $kickoffs->isNotEmpty() ? [
+                'start_date' => $kickoffs->min()->toDateString(),
+                'end_date' => $kickoffs->max()->toDateString(),
+            ] : [],
         );
 
         $keptIds = [];
@@ -153,11 +169,7 @@ class FetchDraw implements ShouldQueue, ShouldBeUnique
         }
 
         $kickoffRaw = data_get($fixture, 'clock.kickOffTimeLong');
-        $status = match (Str::lower((string) data_get($fixture, 'matchState'))) {
-            'fulltime', 'post', 'postmatch' => 'completed',
-            'live', 'inprogress' => 'live',
-            default => 'upcoming',
-        };
+        $status = \App\Support\NrlMatchState::toStatus(data_get($fixture, 'matchState')) ?? 'upcoming';
 
         return Matchup::updateOrCreate(
             [
@@ -167,12 +179,23 @@ class FetchDraw implements ShouldQueue, ShouldBeUnique
             ],
             [
                 'venue' => data_get($fixture, 'venue') ?: data_get($fixture, 'venueCity'),
-                'kickoff_at' => $kickoffRaw ? Carbon::parse($kickoffRaw, 'Australia/Sydney') : null,
+                'kickoff_at' => $kickoffRaw ? $this->parseKickoff($kickoffRaw) : null,
                 'status' => $status,
                 'home_score' => data_get($fixture, 'homeTeam.score'),
                 'away_score' => data_get($fixture, 'awayTeam.score'),
             ],
         );
+    }
+
+    /**
+     * NRL kickoff times are Sydney wall-clock. Normalise into the app
+     * timezone so date comparisons stay correct even if APP_TIMEZONE is
+     * not Australia/Sydney. If the feed ever includes an explicit offset,
+     * Carbon honours it and the fallback tz is ignored — still correct.
+     */
+    protected function parseKickoff(string $raw): Carbon
+    {
+        return Carbon::parse($raw, 'Australia/Sydney')->setTimezone(config('app.timezone'));
     }
 
     /**

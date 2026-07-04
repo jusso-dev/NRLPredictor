@@ -49,8 +49,10 @@ class MultiBetBuilder
         $winnerPool = $legs->where('type', 'match_winner')->sortByDesc('confidence')->values();
         $tryScorerPool = $legs->where('type', 'anytime_try_scorer')->sortByDesc('confidence')->values();
 
-        // Reserve slots: at least 1-2 winner legs if available, rest try scorers
-        $winnerSlots = min($winnerPool->count(), max(1, (int) ceil($maxLegs * 0.35)));
+        // Reserve ~35% of slots for winner legs (at least 1 if available), rest
+        // try scorers. round(), not ceil(): ceil(6 * 0.35) = 3 made half of a
+        // default 6-leg multi winner legs.
+        $winnerSlots = min($winnerPool->count(), max(1, (int) round($maxLegs * 0.35)));
         $tryScorerSlots = $maxLegs - $winnerSlots;
 
         // Pick winner legs first (max 1 per match)
