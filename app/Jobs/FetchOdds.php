@@ -39,7 +39,7 @@ class FetchOdds implements ShouldBeUnique, ShouldQueue
 
     public int $tries = 2;
 
-    public int $uniqueFor = 600;
+    public int $uniqueFor = 700; // > worst case: 2 tries x 300s timeout + backoff
 
     public function backoff(): array
     {

@@ -19,9 +19,10 @@ use App\Jobs\RunPredictionAnalysis;
 use App\Models\Matchup;
 use Illuminate\Support\Facades\Schedule;
 
-// `withoutOverlapping` uses a cache lock so the scheduler never stacks a
-// second copy on top of one still running. 10-minute max lock for short
-// jobs, longer for the AI fanout.
+// Note: these tasks *dispatch* queued jobs and finish in milliseconds, so
+// `withoutOverlapping` only de-dupes the dispatch itself. The real guard
+// against concurrent runs is each job's ShouldBeUnique lock (uniqueFor is
+// sized to the job's worst-case runtime).
 Schedule::job(new FetchDraw)->dailyAt('04:30')->withoutOverlapping(10);
 Schedule::job(new FetchTeamLists)->everyThirtyMinutes()->withoutOverlapping(25);
 Schedule::job(new FetchInjuryUpdates)->everyThirtyMinutes()->withoutOverlapping(25);

@@ -18,7 +18,7 @@ class DataFetchLog extends Model
         return self::create([
             'source' => $source,
             'job_class' => $jobClass,
-            'status' => 'success',
+            'status' => 'running',
             'started_at' => now(),
         ]);
     }

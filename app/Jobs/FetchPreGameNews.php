@@ -30,7 +30,7 @@ class FetchPreGameNews implements ShouldBeUnique, ShouldQueue
 
     public int $tries = 2;
 
-    public int $uniqueFor = 240;
+    public int $uniqueFor = 700; // > worst case: 2 tries x 300s timeout + backoff
 
     public function uniqueId(): string
     {

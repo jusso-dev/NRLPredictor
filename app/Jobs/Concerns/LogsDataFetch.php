@@ -24,4 +24,19 @@ trait LogsDataFetch
         $this->log?->fail($e);
         report($e);
     }
+
+    /**
+     * Called by the queue worker when the job finally fails — including
+     * timeouts, where the in-handle catch/failLog never runs. $this->log is
+     * not serialized, so find the open row for this job class instead of
+     * leaving it stuck "running" until the sweeper gets to it.
+     */
+    public function failed(?Throwable $e = null): void
+    {
+        DataFetchLog::where('job_class', static::class)
+            ->whereNull('completed_at')
+            ->orderByDesc('id')
+            ->first()
+            ?->fail($e ?? new \RuntimeException('Job failed without an exception (timed out or worker died).'));
+    }
 }
