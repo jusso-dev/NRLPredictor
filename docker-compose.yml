@@ -1,3 +1,28 @@
+# Shared env for all PHP containers. APP_TIMEZONE must be identical everywhere:
+# the scheduler's kickoff-window gates and the queue jobs both compare NRL
+# (Sydney) kickoff times against now() — a UTC worker fires them ~10h late.
+x-app-env: &app-env
+  APP_TIMEZONE: Australia/Sydney
+  APP_KEY: ${APP_KEY}
+  APP_ENV: ${APP_ENV:-production}
+  APP_DEBUG: ${APP_DEBUG:-false}
+  DB_CONNECTION: mysql
+  DB_HOST: mysql
+  DB_PORT: 3306
+  DB_DATABASE: ${DB_DATABASE:-nrl_expert}
+  DB_USERNAME: ${DB_USERNAME:-nrl}
+  DB_PASSWORD: ${DB_PASSWORD:-nrl_secret}
+  QUEUE_CONNECTION: database
+  CACHE_STORE: database
+  SESSION_DRIVER: database
+  # Must exceed the longest job $timeout (600s) or the DB queue re-releases
+  # jobs that are still running, causing duplicate runs and phantom failures.
+  DB_QUEUE_RETRY_AFTER: 660
+  ODDS_API_KEY: ${ODDS_API_KEY}
+  CODEX_HOME: /root/.codex
+  CODEX_MODEL: ${CODEX_MODEL:-}
+  CODEX_TIMEOUT_SECONDS: ${CODEX_TIMEOUT_SECONDS:-300}
+
 services:
   mysql:
     image: mysql:8.0
@@ -26,24 +51,12 @@ services:
       mysql:
         condition: service_healthy
     environment:
+      <<: *app-env
       APP_URL: http://localhost:8000
-      APP_TIMEZONE: Australia/Sydney
-      APP_KEY: ${APP_KEY}
-      APP_ENV: ${APP_ENV:-production}
-      APP_DEBUG: ${APP_DEBUG:-false}
-      DB_CONNECTION: mysql
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_DATABASE: ${DB_DATABASE:-nrl_expert}
-      DB_USERNAME: ${DB_USERNAME:-nrl}
-      DB_PASSWORD: ${DB_PASSWORD:-nrl_secret}
-      QUEUE_CONNECTION: database
-      CACHE_STORE: database
-      SESSION_DRIVER: database
-      AI_AGENT_SERVICE_URL: http://agent:5000
-      AI_AGENT_CALLBACK_URL: http://app:8000
-      AI_AGENT_INTERNAL_SECRET: ${AI_AGENT_INTERNAL_SECRET}
-      ODDS_API_KEY: ${ODDS_API_KEY}
+    volumes:
+      # Codex CLI auth (ChatGPT Pro OAuth). Must stay read-write: the refresh
+      # token rotates inside this directory.
+      - ${HOME}/.codex:/root/.codex
     ports:
       - "0.0.0.0:8000:8000"
     command:
@@ -62,23 +75,13 @@ services:
       app:
         condition: service_started
     environment:
-      APP_KEY: ${APP_KEY}
-      APP_ENV: ${APP_ENV:-production}
-      APP_DEBUG: ${APP_DEBUG:-false}
-      DB_CONNECTION: mysql
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_DATABASE: ${DB_DATABASE:-nrl_expert}
-      DB_USERNAME: ${DB_USERNAME:-nrl}
-      DB_PASSWORD: ${DB_PASSWORD:-nrl_secret}
-      QUEUE_CONNECTION: database
-      CACHE_STORE: database
-      SESSION_DRIVER: database
-      AI_AGENT_SERVICE_URL: http://agent:5000
-      AI_AGENT_CALLBACK_URL: http://app:8000
-      AI_AGENT_INTERNAL_SECRET: ${AI_AGENT_INTERNAL_SECRET}
-      ODDS_API_KEY: ${ODDS_API_KEY}
-    command: ["php", "artisan", "queue:work", "--tries=3", "--sleep=3"]
+      <<: *app-env
+    volumes:
+      - ${HOME}/.codex:/root/.codex
+    # --max-time recycles the worker hourly (docker restarts it) so memory
+    # bloat or a wedged process never lingers. Job classes define their own
+    # $tries/$timeout; --tries=1 is the default for jobs that don't.
+    command: ["php", "artisan", "queue:work", "--tries=1", "--sleep=3", "--max-time=3600"]
 
   scheduler:
     build:
@@ -91,38 +94,8 @@ services:
       app:
         condition: service_started
     environment:
-      APP_KEY: ${APP_KEY}
-      APP_ENV: ${APP_ENV:-production}
-      APP_DEBUG: ${APP_DEBUG:-false}
-      DB_CONNECTION: mysql
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_DATABASE: ${DB_DATABASE:-nrl_expert}
-      DB_USERNAME: ${DB_USERNAME:-nrl}
-      DB_PASSWORD: ${DB_PASSWORD:-nrl_secret}
-      QUEUE_CONNECTION: database
-      CACHE_STORE: database
-      SESSION_DRIVER: database
-      AI_AGENT_SERVICE_URL: http://agent:5000
-      AI_AGENT_CALLBACK_URL: http://app:8000
-      AI_AGENT_INTERNAL_SECRET: ${AI_AGENT_INTERNAL_SECRET}
-      ODDS_API_KEY: ${ODDS_API_KEY}
+      <<: *app-env
     command: ["php", "artisan", "schedule:work"]
-
-  agent:
-    build:
-      context: ./python-agent
-    restart: unless-stopped
-    environment:
-      CODEX_HOME: /home/agent/.codex
-      CODEX_MODEL: ${CODEX_MODEL:-}
-      CODEX_TIMEOUT_SECONDS: ${CODEX_TIMEOUT_SECONDS:-300}
-      AI_AGENT_INTERNAL_SECRET: ${AI_AGENT_INTERNAL_SECRET}
-      AI_AGENT_CALLBACK_URL: http://app:8000
-    volumes:
-      - ${HOME}/.codex:/home/agent/.codex
-    ports:
-      - "5055:5000"
 
 volumes:
   mysql-data:

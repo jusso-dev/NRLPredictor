@@ -39,19 +39,16 @@ return [
         'key' => env('ODDS_API_KEY'),
     ],
 
-    'ai_agent' => [
-        // URL of the Python Flask agent service; set per-environment.
-        // The Python service subprocesses the OpenAI Codex CLI, authenticated
-        // via a host-mounted ChatGPT Pro session at ~/.codex.
-        'service_url' => env('AI_AGENT_SERVICE_URL', 'http://agent:5000'),
+    'codex' => [
+        // OpenAI Codex CLI, run in-process via `codex exec`. Auth comes from
+        // the ChatGPT Pro OAuth session in $CODEX_HOME (docker-compose mounts
+        // the host's ~/.codex there).
+        'bin' => env('CODEX_BIN', 'codex'),
 
-        // Shared secret the agent uses when calling Laravel callbacks,
-        // and that Laravel uses when calling the agent.
-        'internal_secret' => env('AI_AGENT_INTERNAL_SECRET'),
+        // Blank = use the default from ~/.codex/config.toml.
+        'model' => env('CODEX_MODEL', ''),
 
-        // Public base URL the Flask agent uses to reach Laravel
-        // (service name + port inside the docker network).
-        'laravel_callback_url' => env('AI_AGENT_CALLBACK_URL', 'http://app:8000'),
+        'timeout' => (int) env('CODEX_TIMEOUT_SECONDS', 300),
     ],
 
 ];

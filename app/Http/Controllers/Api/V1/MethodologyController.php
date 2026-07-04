@@ -55,7 +55,7 @@ class MethodologyController extends Controller
             ],
             'ai_review' => [
                 'description' => 'Optional AI review adjusts scores by up to +/-15 points using team lists, injuries, venue history, and news context.',
-                'model' => env('CODEX_MODEL') ?: 'codex-cli (config default)',
+                'model' => config('services.codex.model') ?: 'codex-cli (config default)',
             ],
         ]);
     }
