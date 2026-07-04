@@ -86,6 +86,7 @@ class FetchTeamLists implements ShouldQueue, ShouldBeUnique
     protected function syncSide(Matchup $match, int $teamId, array $players): int
     {
         $count = 0;
+        $keptPlayerIds = [];
         foreach ($players as $raw) {
             $firstName = trim((string) data_get($raw, 'firstName'));
             $lastName = trim((string) data_get($raw, 'lastName'));
@@ -95,29 +96,19 @@ class FetchTeamLists implements ShouldQueue, ShouldBeUnique
                 continue;
             }
 
-            $slug = Str::slug($name);
-
-            // Find existing player by name slug, or by legacy nrl-ID slug
-            $nrlId = data_get($raw, 'playerId');
-            $player = Player::where('nrl_slug', $slug)->first();
-            if (! $player && $nrlId) {
-                $player = Player::where('nrl_slug', 'nrl-' . $nrlId)->first();
-                // Migrate legacy slug to name-based slug
-                if ($player) {
-                    $player->update(['nrl_slug' => $slug]);
-                }
-            }
-            if (! $player) {
-                $player = Player::create([
-                    'nrl_slug' => $slug,
-                    'name' => $name,
-                    'team_id' => $teamId,
-                    'position' => $this->mapPosition((string) data_get($raw, 'position')),
-                ]);
-            }
+            $player = $this->resolvePlayer($name, $teamId, data_get($raw, 'playerId'), (string) data_get($raw, 'position'));
 
             if ($player->team_id !== $teamId) {
                 $player->update(['team_id' => $teamId]);
+            }
+
+            // Positions only arrive on team-list day; backfill players created
+            // before we could map one (bench-only strings map to null).
+            if ($player->position === null) {
+                $mapped = $this->mapPosition((string) data_get($raw, 'position'));
+                if ($mapped !== null) {
+                    $player->update(['position' => $mapped]);
+                }
             }
 
             $role = match (true) {
@@ -135,9 +126,69 @@ class FetchTeamLists implements ShouldQueue, ShouldBeUnique
                     'is_confirmed' => (bool) data_get($raw, 'isOnField', false),
                 ],
             );
+            $keptPlayerIds[] = $player->id;
             $count++;
         }
+
+        // Late outs and re-shuffles: anyone previously listed for this side of
+        // the match who is no longer in the feed gets removed, otherwise
+        // dropped players keep getting scored and picked for multis.
+        if ($keptPlayerIds !== []) {
+            MatchTeamList::where('match_id', $match->id)
+                ->where('team_id', $teamId)
+                ->whereNotIn('player_id', $keptPlayerIds)
+                ->delete();
+        }
+
         return $count;
+    }
+
+    /**
+     * Prefer the stable NRL playerId over name slugs — two players can share
+     * a name, and the same player can be spelt differently between feeds.
+     */
+    protected function resolvePlayer(string $name, int $teamId, mixed $nrlId, string $rawPosition): Player
+    {
+        $slug = Str::slug($name);
+        $nrlId = is_numeric($nrlId) ? (int) $nrlId : null;
+
+        $player = null;
+        if ($nrlId) {
+            $player = Player::where('nrl_player_id', $nrlId)->first();
+        }
+        if (! $player) {
+            // A same-name row that carries a DIFFERENT stable id is a
+            // different person — don't match it, fall through to create.
+            $player = Player::where('nrl_slug', $slug)
+                ->when($nrlId, fn ($q) => $q->where(
+                    fn ($qq) => $qq->whereNull('nrl_player_id')->orWhere('nrl_player_id', $nrlId),
+                ))
+                ->first();
+        }
+        if (! $player && $nrlId) {
+            // Legacy rows keyed by nrl-{id} slug; migrate to name-based slug
+            $player = Player::where('nrl_slug', 'nrl-'.$nrlId)->first();
+            if ($player && ! Player::where('nrl_slug', $slug)->exists()) {
+                $player->update(['nrl_slug' => $slug]);
+            }
+        }
+
+        if (! $player) {
+            return Player::create([
+                'nrl_slug' => Player::where('nrl_slug', $slug)->exists() ? "{$slug}-{$nrlId}" : $slug,
+                'nrl_player_id' => $nrlId,
+                'name' => $name,
+                'team_id' => $teamId,
+                'position' => $this->mapPosition($rawPosition),
+            ]);
+        }
+
+        // Capture the stable id the first time we see it for an existing row.
+        if ($nrlId && $player->nrl_player_id === null) {
+            $player->update(['nrl_player_id' => $nrlId]);
+        }
+
+        return $player;
     }
 
     protected function mapPosition(string $raw): ?string

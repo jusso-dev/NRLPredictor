@@ -51,9 +51,13 @@ class Round extends Model
                 return $inWindow;
             }
 
-            // Round is done — check if there's an upcoming round to move to
-            $upcoming = self::whereDate('start_date', '>', $today)
+            // Round is done — check if there's an upcoming round to move to.
+            // >= today, not > today: the next round can start the same day
+            // the previous one wraps up (e.g. a Thursday opener).
+            $upcoming = self::whereDate('start_date', '>=', $today)
+                ->whereKeyNot($inWindow->id)
                 ->orderBy('start_date')
+                ->orderBy('round_number')
                 ->first();
             if ($upcoming) {
                 return $upcoming;
@@ -63,8 +67,9 @@ class Round extends Model
             return $inWindow;
         }
 
-        $upcoming = self::whereDate('start_date', '>', $today)
+        $upcoming = self::whereDate('start_date', '>=', $today)
             ->orderBy('start_date')
+            ->orderBy('round_number')
             ->first();
         if ($upcoming) {
             return $upcoming;

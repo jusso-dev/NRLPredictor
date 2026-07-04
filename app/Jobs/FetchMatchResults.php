@@ -32,7 +32,7 @@ class FetchMatchResults implements ShouldBeUnique, ShouldQueue
 
     public int $tries = 2;
 
-    public int $uniqueFor = 900;
+    public int $uniqueFor = 1300; // > worst case: 2 tries x 600s timeout + backoff
 
     public function uniqueId(): string
     {
@@ -70,10 +70,9 @@ class FetchMatchResults implements ShouldBeUnique, ShouldQueue
             }
 
             $fixtures = data_get($drawResponse->json(), 'fixtures', []);
-            $completed = collect($fixtures)->filter(fn ($f) => in_array(
-                Str::lower($f['matchState'] ?? ''),
-                ['fulltime', 'post', 'postmatch'],
-            ));
+            $completed = collect($fixtures)->filter(
+                fn ($f) => \App\Support\NrlMatchState::toStatus($f['matchState'] ?? null) === 'completed',
+            );
 
             foreach ($completed as $fixture) {
                 $matchCentreUrl = $fixture['matchCentreUrl'] ?? null;
@@ -335,15 +334,19 @@ class FetchMatchResults implements ShouldBeUnique, ShouldQueue
         }
 
         $slug = Str::slug($name);
+        $resolvedTeamId = $teamMap[$teamId] ?? null;
 
-        // Try to find existing player
+        // Slug, then exact name, then a LIKE constrained to the scoring team.
+        // An unscoped substring LIKE can pin a try on the wrong player
+        // ("Smith" matches half the comp).
         $player = Player::where('nrl_slug', $slug)->first()
-            ?? Player::where('name', 'LIKE', "%{$name}%")->first();
+            ?? Player::where('name', $name)->first()
+            ?? ($resolvedTeamId
+                ? Player::where('team_id', $resolvedTeamId)->where('name', 'LIKE', "%{$name}%")->first()
+                : null);
 
         // If not found, create them
         if (! $player) {
-            $resolvedTeamId = $teamMap[$teamId] ?? null;
-
             $player = Player::create([
                 'nrl_slug' => $slug,
                 'name' => $name,

@@ -1342,11 +1342,14 @@ class SignalCalculator
 
     /**
      * Average a numeric stat across a team's last 5 completed match-team-stats rows.
-     * Cached per request keyed by team to avoid hammering the DB.
+     * Cached on the instance (NOT `static` — that would live for the whole
+     * queue-worker daemon and serve stale form data for days).
      */
+    protected array $teamRollingStatCache = [];
+
     protected function teamRollingStat(int $teamId, \Closure $extractor): ?float
     {
-        static $cache = [];
+        $cache = &$this->teamRollingStatCache;
         if (! isset($cache[$teamId])) {
             $cache[$teamId] = MatchTeamStats::where('team_id', $teamId)
                 ->whereHas('match', fn ($q) => $q->where('status', 'completed'))

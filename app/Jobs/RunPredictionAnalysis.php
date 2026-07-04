@@ -43,6 +43,11 @@ class RunPredictionAnalysis implements ShouldQueue, ShouldBeUnique
         $scored = 0;
         $skipped = 0;
 
+        // The tuned-weights cache is static and this worker is a daemon —
+        // without this, weights written by AutoTuneAfterRound after the
+        // process started would never be picked up.
+        \App\Services\SignalCalculator::clearTunedCache();
+
         try {
             $matches = $this->matchId
                 ? Matchup::where('id', $this->matchId)->get()

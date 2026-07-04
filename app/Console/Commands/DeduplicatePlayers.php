@@ -2,11 +2,10 @@
 
 namespace App\Console\Commands;
 
-use App\Models\MatchTeamList;
 use App\Models\Player;
-use App\Models\Prediction;
 use App\Models\TryEvent;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
@@ -67,20 +66,49 @@ class DeduplicatePlayers extends Command
 
     protected function mergePlayers(Player $keep, Player $remove): void
     {
-        // Move all references from $remove to $keep
-        TryEvent::where('player_id', $remove->id)->update(['player_id' => $keep->id]);
-        MatchTeamList::where('player_id', $remove->id)->update(['player_id' => $keep->id]);
-        Prediction::where('player_id', $remove->id)->update(['player_id' => $keep->id]);
+        DB::transaction(function () use ($keep, $remove) {
+            // Tables without unique(player_id, x) constraints: straight move.
+            TryEvent::where('player_id', $remove->id)->update(['player_id' => $keep->id]);
+            DB::table('injuries')->where('player_id', $remove->id)->update(['player_id' => $keep->id]);
+            DB::table('suspensions')->where('player_id', $remove->id)->update(['player_id' => $keep->id]);
+            DB::table('odds_snapshots')->where('player_id', $remove->id)->update(['player_id' => $keep->id]);
+            DB::table('milestone_events')->where('player_id', $remove->id)->update(['player_id' => $keep->id]);
 
-        // Copy any useful data from $remove to $keep
-        if (! $keep->position && $remove->position) {
-            $keep->position = $remove->position;
-        }
-        if (! $keep->team_id && $remove->team_id) {
-            $keep->team_id = $remove->team_id;
-        }
-        $keep->save();
+            // Tables with a unique key on (player_id, x): only move rows that
+            // won't collide with one the keeper already has. Collisions stay on
+            // $remove and cascade-delete with it.
+            $this->moveUnlessDuplicate('match_team_lists', $remove->id, $keep->id, 'match_id');
+            $this->moveUnlessDuplicate('predictions', $remove->id, $keep->id, 'match_id');
+            $this->moveUnlessDuplicate('player_venue_stats', $remove->id, $keep->id, 'venue');
+            $this->moveUnlessDuplicate('player_opponent_stats', $remove->id, $keep->id, 'opponent_team_id');
+            $this->moveUnlessDuplicate('player_club_histories', $remove->id, $keep->id, 'team_id');
 
-        $remove->delete();
+            // Copy any useful data from $remove to $keep
+            if (! $keep->position && $remove->position) {
+                $keep->position = $remove->position;
+            }
+            if (! $keep->team_id && $remove->team_id) {
+                $keep->team_id = $remove->team_id;
+            }
+            if (! $keep->nrl_player_id && $remove->nrl_player_id) {
+                $nrlId = $remove->nrl_player_id;
+                $remove->update(['nrl_player_id' => null]); // unique index
+                $keep->nrl_player_id = $nrlId;
+            }
+            $keep->save();
+
+            $remove->delete();
+        });
+    }
+
+    protected function moveUnlessDuplicate(string $table, int $fromId, int $toId, string $scopeColumn): void
+    {
+        // Materialised first: MySQL can't subquery the table being updated.
+        $taken = DB::table($table)->where('player_id', $toId)->pluck($scopeColumn)->all();
+
+        DB::table($table)
+            ->where('player_id', $fromId)
+            ->when($taken !== [], fn ($q) => $q->whereNotIn($scopeColumn, $taken))
+            ->update(['player_id' => $toId]);
     }
 }

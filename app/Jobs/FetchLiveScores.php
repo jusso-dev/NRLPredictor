@@ -29,7 +29,7 @@ class FetchLiveScores implements ShouldBeUnique, ShouldQueue
 
     public int $tries = 2;
 
-    public int $uniqueFor = 240;
+    public int $uniqueFor = 280; // > worst case: 2 tries x 120s timeout + backoff
 
     public function uniqueId(): string
     {
@@ -73,17 +73,9 @@ class FetchLiveScores implements ShouldBeUnique, ShouldQueue
                 $awayNickname = data_get($fixture, 'awayTeam.nickName');
                 $homeScore = data_get($fixture, 'homeTeam.score');
                 $awayScore = data_get($fixture, 'awayTeam.score');
-                $matchState = Str::lower($fixture['matchState'] ?? '');
+                $status = \App\Support\NrlMatchState::toStatus($fixture['matchState'] ?? null);
 
-                $status = match (true) {
-                    in_array($matchState, ['fulltime', 'post', 'postmatch']) => 'completed',
-                    in_array($matchState, ['live', 'inprogress', 'halftime']) => 'live',
-                    str_contains($matchState, 'half') => 'live',
-                    str_contains($matchState, 'live') => 'live',
-                    default => null,
-                };
-
-                if ($status === null) {
+                if ($status === null || $status === 'upcoming') {
                     continue; // Skip upcoming matches
                 }
 
