@@ -7,6 +7,7 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Symfony\Component\DomCrawler\Crawler;
 
 /**
@@ -33,6 +34,40 @@ class HttpScraper
             return null;
         }
         return new Crawler($response->body(), $url);
+    }
+
+    /**
+     * Fetch a JSON document and fail closed when an upstream service responds
+     * with HTML, an error document, or a changed payload shape. A 200 status
+     * by itself is not evidence that a data fetch succeeded.
+     *
+     * @param array<int, string> $requiredPaths Dot-notation paths that must be present.
+     * @return array<string, mixed>
+     */
+    public function json(string $url, array $requiredPaths = []): array
+    {
+        $response = $this->get($url);
+        if (! $response->successful()) {
+            throw new RuntimeException("Unexpected HTTP {$response->status()} from {$url}");
+        }
+
+        $contentType = Str::lower((string) $response->header('Content-Type'));
+        if (! str_contains($contentType, 'json')) {
+            throw new RuntimeException("Expected JSON from {$url}; received {$contentType} instead");
+        }
+
+        $data = $response->json();
+        if (! is_array($data)) {
+            throw new RuntimeException("Invalid JSON document from {$url}");
+        }
+
+        foreach ($requiredPaths as $path) {
+            if (data_get($data, $path) === null) {
+                throw new RuntimeException("JSON response from {$url} is missing required field {$path}");
+            }
+        }
+
+        return $data;
     }
 
     protected function client(): PendingRequest

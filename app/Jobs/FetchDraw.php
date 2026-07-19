@@ -7,6 +7,7 @@ use App\Models\Matchup;
 use App\Models\Round;
 use App\Models\Team;
 use App\Support\HttpScraper;
+use App\Support\NrlDrawPage;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -14,7 +15,6 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -40,30 +40,18 @@ class FetchDraw implements ShouldQueue, ShouldBeUnique
         return 'fetch:draw:'.($this->season ?? 'current').':'.($this->round ?? 'all');
     }
 
-    public function handle(HttpScraper $http): void
+    public function handle(HttpScraper $http, NrlDrawPage $drawPage): void
     {
         $season = $this->season ?? now()->year;
         $rounds = $this->round ? [$this->round] : $this->detectCurrentRounds($season);
 
-        // Fresh-DB bootstrap returns all 27 rounds — far more scraping than one
-        // job's timeout can hold. Fan out one uniquely-keyed job per round
-        // instead of looping inline.
-        if (count($rounds) > 3) {
-            $this->startLog('nrl.com/draw/data');
-            foreach ($rounds as $roundNumber) {
-                self::dispatch($season, $roundNumber);
-            }
-            $this->completeLog(count($rounds));
-
-            return;
-        }
-
-        $this->startLog('nrl.com/draw/data');
+        $this->startLog('site.api.espn.com/nrl-scoreboard');
         $records = 0;
 
         try {
+            $fixturesByRound = $drawPage->fixturesForRounds($http, $season, $rounds);
             foreach ($rounds as $roundNumber) {
-                $records += $this->fetchRound($http, $season, $roundNumber);
+                $records += $this->fetchRound($fixturesByRound[$roundNumber], $season, $roundNumber);
             }
             $this->completeLog($records);
         } catch (Throwable $e) {
@@ -88,8 +76,8 @@ class FetchDraw implements ShouldQueue, ShouldBeUnique
             return $nums;
         }
 
-        // No rounds at all yet — bootstrap by fetching all
-        if (\App\Models\Round::where('season', $season)->count() === 0) {
+        // Empty rounds from a failed prior fetch must not block a full bootstrap.
+        if (\App\Models\Round::where('season', $season)->whereHas('matches')->count() === 0) {
             return range(1, 27);
         }
 
@@ -102,25 +90,22 @@ class FetchDraw implements ShouldQueue, ShouldBeUnique
         return $nums;
     }
 
-    protected function fetchRound(HttpScraper $http, int $season, int $roundNumber): int
+    /** @param array<int, array<string, mixed>> $fixtures */
+    protected function fetchRound(array $fixtures, int $season, int $roundNumber): int
     {
-        $url = sprintf(
-            'https://www.nrl.com/draw/data?competition=111&season=%d&round=%d',
-            $season,
-            $roundNumber,
-        );
-
-        // The JSON endpoint needs a JSON accept header; HttpScraper is HTML-focused.
-        // We borrow its throttler by calling the get() method but then re-parse.
-        $response = $http->get($url);
-        if (! $response->successful()) {
-            return 0;
+        // Never create a round until all fixture teams can be resolved.
+        // Otherwise Round::current() can select an empty, unusable round.
+        $unresolvedTeams = [];
+        foreach ($fixtures as $fixture) {
+            foreach (['homeTeam.nickName', 'awayTeam.nickName'] as $path) {
+                $nickname = data_get($fixture, $path);
+                if (! is_string($nickname) || ! $this->resolveTeam($nickname)) {
+                    $unresolvedTeams[] = (string) ($nickname ?: '[missing]');
+                }
+            }
         }
-
-        $data = $response->json();
-        $fixtures = data_get($data, 'fixtures', []);
-        if (empty($fixtures)) {
-            return 0;
+        if ($unresolvedTeams !== []) {
+            throw new \RuntimeException('Unable to resolve NRL draw teams: '.implode(', ', array_unique($unresolvedTeams)));
         }
 
         $kickoffs = collect($fixtures)
