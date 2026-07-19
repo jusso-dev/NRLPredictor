@@ -56,4 +56,26 @@ class NrlDrawPageTest extends TestCase
         $this->assertSame('Panthers', data_get($fixtures, '0.homeTeam.nickName'));
         $this->assertSame('fulltime', data_get($fixtures, '0.matchState'));
     }
+
+    public function test_it_accepts_the_official_wests_tigers_team_name(): void
+    {
+        $http = Mockery::mock(HttpScraper::class);
+        $http->shouldReceive('json')->once()->andReturn([
+            'events' => [[
+                'season' => ['year' => 2026],
+                'week' => ['number' => 20],
+                'date' => '2026-07-16T09:50Z',
+                'competitions' => [[
+                    'competitors' => [
+                        ['homeAway' => 'home', 'team' => ['displayName' => 'Wests Tigers']],
+                        ['homeAway' => 'away', 'team' => ['displayName' => 'Broncos']],
+                    ],
+                ]],
+            ]],
+        ]);
+
+        $fixtures = (new NrlDrawPage)->fixtures($http, 2026, 20);
+
+        $this->assertSame('Wests Tigers', data_get($fixtures, '0.homeTeam.nickName'));
+    }
 }

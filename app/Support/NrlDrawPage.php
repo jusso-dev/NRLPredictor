@@ -17,7 +17,7 @@ class NrlDrawPage
     private const NRL_CLUB_NAMES = [
         'Broncos', 'Bulldogs', 'Cowboys', 'Dolphins', 'Dragons', 'Eels',
         'Knights', 'Panthers', 'Rabbitohs', 'Raiders', 'Roosters', 'Sea Eagles',
-        'Sharks', 'Storm', 'Tigers', 'Titans', 'Warriors',
+        'Sharks', 'Storm', 'Tigers', 'Titans', 'Warriors', 'Wests Tigers',
     ];
 
     /** @return array<int, array<string, mixed>> */
