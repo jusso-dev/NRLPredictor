@@ -13,6 +13,13 @@ use RuntimeException;
  */
 class NrlDrawPage
 {
+    /** @var array<int, string> */
+    private const NRL_CLUB_NAMES = [
+        'Broncos', 'Bulldogs', 'Cowboys', 'Dolphins', 'Dragons', 'Eels',
+        'Knights', 'Panthers', 'Rabbitohs', 'Raiders', 'Roosters', 'Sea Eagles',
+        'Sharks', 'Storm', 'Tigers', 'Titans', 'Warriors',
+    ];
+
     /** @return array<int, array<string, mixed>> */
     public function fixtures(HttpScraper $http, int $season, int $round): array
     {
@@ -45,7 +52,8 @@ class NrlDrawPage
             $eventRound = (int) data_get($event, 'week.number');
             if (! is_array($event)
                 || (int) data_get($event, 'season.year') !== $season
-                || ! in_array($eventRound, $rounds, true)) {
+                || ! in_array($eventRound, $rounds, true)
+                || ! $this->isClubFixture($event)) {
                 continue;
             }
 
@@ -97,6 +105,16 @@ class NrlDrawPage
                 'score' => $this->score($away),
             ],
         ];
+    }
+
+    protected function isClubFixture(array $event): bool
+    {
+        $teams = collect(data_get($event, 'competitions.0.competitors', []))
+            ->map(fn (mixed $competitor) => data_get($competitor, 'team.displayName', data_get($competitor, 'team.name')))
+            ->all();
+
+        return count($teams) === 2
+            && collect($teams)->every(fn (mixed $team) => is_string($team) && in_array($team, self::NRL_CLUB_NAMES, true));
     }
 
     protected function score(array $competitor): ?int

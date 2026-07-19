@@ -37,6 +37,16 @@ class NrlDrawPageTest extends TestCase
                         ['homeAway' => 'away', 'score' => '14', 'team' => ['displayName' => 'Broncos']],
                     ],
                 ]],
+            ], [
+                'id' => 'origin-1',
+                'season' => ['year' => 2026],
+                'week' => ['number' => 20],
+                'competitions' => [[
+                    'competitors' => [
+                        ['homeAway' => 'home', 'team' => ['displayName' => 'New South Wales']],
+                        ['homeAway' => 'away', 'team' => ['displayName' => 'Queensland']],
+                    ],
+                ]],
             ]],
         ]);
 
