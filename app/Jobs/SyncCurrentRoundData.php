@@ -54,18 +54,26 @@ class SyncCurrentRoundData implements ShouldQueue, ShouldBeUnique
         $this->startLog('internal.sync');
 
         try {
+            // Keep the dependency chain limited to work that can produce the
+            // current-round experience from the data already in our database.
+            // External enrichers must report their own failures, but must not
+            // prevent fixture refreshes and predictions when a provider
+            // changes or becomes unavailable.
             $jobs = [
                 new FetchDraw($round->season, $round->round_number),
-                new FetchTeamLists,
-                new FetchMatchResults,
                 new FetchPlayerStats,
-                new FetchInjuryUpdates,
-                new FetchNrlArticles,
-                new FetchWeatherForecasts,
                 new ComputeMatchMetadata,
                 new ComputeTeamTryDistributions,
                 new RunPredictionAnalysis,
                 new DispatchAiAnalysisFanout,
+            ];
+
+            $enrichers = [
+                new FetchTeamLists,
+                new FetchMatchResults,
+                new FetchInjuryUpdates,
+                new FetchNrlArticles,
+                new FetchWeatherForecasts,
             ];
 
             Bus::chain($jobs)
@@ -86,10 +94,18 @@ class SyncCurrentRoundData implements ShouldQueue, ShouldBeUnique
                 })
                 ->dispatch();
 
+            // These jobs remain fail-closed: their DataFetchLog entry will be
+            // marked failed if an upstream response is invalid. Dispatching
+            // them separately prevents one unavailable optional data source
+            // from aborting the core sync chain.
+            foreach ($enrichers as $enricher) {
+                dispatch($enricher);
+            }
+
             Log::info("SyncCurrentRoundData: queued chain for round {$round->round_number}/{$round->season}");
             // "Success" here means the chain was queued, not that it finished —
             // each chained job writes its own log row as it runs.
-            $this->completeLog(count($jobs));
+            $this->completeLog(count($jobs) + count($enrichers));
         } catch (Throwable $e) {
             $this->failLog($e);
             throw $e;
