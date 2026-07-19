@@ -10,6 +10,7 @@ use App\Models\Player;
 use App\Models\Round;
 use App\Models\TryEvent;
 use App\Support\HttpScraper;
+use App\Support\NrlDrawPage;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -44,7 +45,7 @@ class FetchMatchResults implements ShouldBeUnique, ShouldQueue
         return [30];
     }
 
-    public function handle(HttpScraper $http): void
+    public function handle(HttpScraper $http, NrlDrawPage $drawPage): void
     {
         $round = Round::current();
         if (! $round) {
@@ -55,21 +56,7 @@ class FetchMatchResults implements ShouldBeUnique, ShouldQueue
         $records = 0;
 
         try {
-            // Get the draw to find matchCentreUrls for completed matches
-            $drawUrl = sprintf(
-                'https://www.nrl.com/draw/data?competition=111&season=%d&round=%d',
-                $round->season,
-                $round->round_number,
-            );
-
-            $drawResponse = $http->get($drawUrl);
-            if (! $drawResponse->successful()) {
-                $this->completeLog(0);
-
-                return;
-            }
-
-            $fixtures = data_get($drawResponse->json(), 'fixtures', []);
+            $fixtures = $drawPage->fixtures($http, $round->season, $round->round_number);
             $completed = collect($fixtures)->filter(
                 fn ($f) => \App\Support\NrlMatchState::toStatus($f['matchState'] ?? null) === 'completed',
             );
@@ -109,13 +96,8 @@ class FetchMatchResults implements ShouldBeUnique, ShouldQueue
         }
 
         // Fetch match centre JSON
-        $url = 'https://www.nrl.com'.rtrim($matchCentreUrl, '/').'/data';
-        $response = $http->get($url);
-        if (! $response->successful()) {
-            return 0;
-        }
-
-        $data = $response->json();
+        $url = 'https://www.nrl.com' . rtrim($matchCentreUrl, '/') . '/data';
+        $data = $http->json($url, ['homeTeam', 'awayTeam']);
         $count = 0;
 
         // Build NRL teamId → our team_id mapping

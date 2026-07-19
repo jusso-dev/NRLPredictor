@@ -8,7 +8,7 @@ use Illuminate\Console\Command;
 class FetchDrawCommand extends Command
 {
     protected $signature = 'nrl:fetch-draw {--season=} {--round=} {--all : Fetch all 27 rounds instead of just the current}';
-    protected $description = 'Pull real NRL fixture data from nrl.com\'s draw JSON endpoint. Defaults to the current round (+1).';
+    protected $description = 'Pull NRL fixture data from ESPN\'s public scoreboard API. Defaults to the current round (+1).';
 
     public function handle(): int
     {

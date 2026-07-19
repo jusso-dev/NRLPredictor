@@ -36,13 +36,8 @@ class FetchInjuryUpdates implements ShouldQueue, ShouldBeUnique
         $records = 0;
 
         try {
-            $response = $http->get('https://www.nrl.com/casualty-ward/data');
-            if (! $response->successful()) {
-                $this->completeLog(0);
-                return;
-            }
-
-            $casualties = data_get($response->json(), 'casualties', []);
+            $data = $http->json('https://www.nrl.com/casualty-ward/data', ['casualties']);
+            $casualties = data_get($data, 'casualties', []);
 
             // Track which players we've seen so we can resolve recovered ones
             $seenPlayerIds = [];

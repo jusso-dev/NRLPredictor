@@ -62,14 +62,7 @@ class FetchTeamLists implements ShouldQueue, ShouldBeUnique
                     $match->awayTeam->nrl_slug,
                 );
 
-                $response = $http->get($url);
-                if (! $response->successful()) {
-                    Log::warning("FetchTeamLists: HTTP {$response->status()} for match {$match->id}");
-                    $skipped++;
-                    continue;
-                }
-
-                $data = $response->json() ?: [];
+                $data = $http->json($url, ['homeTeam', 'awayTeam']);
                 $records += $this->syncSide($match, $match->home_team_id, data_get($data, 'homeTeam.players', []));
                 $records += $this->syncSide($match, $match->away_team_id, data_get($data, 'awayTeam.players', []));
             }

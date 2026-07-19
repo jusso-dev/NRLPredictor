@@ -8,6 +8,7 @@ use App\Models\Player;
 use App\Models\Round;
 use App\Models\TryEvent;
 use App\Support\HttpScraper;
+use App\Support\NrlDrawPage;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -41,7 +42,7 @@ class FetchLiveScores implements ShouldBeUnique, ShouldQueue
         return [10];
     }
 
-    public function handle(HttpScraper $http): void
+    public function handle(HttpScraper $http, NrlDrawPage $drawPage): void
     {
         $round = Round::current();
         if (! $round) {
@@ -52,21 +53,7 @@ class FetchLiveScores implements ShouldBeUnique, ShouldQueue
         $records = 0;
 
         try {
-            // Use the draw JSON API to get current scores and status
-            $url = sprintf(
-                'https://www.nrl.com/draw/data?competition=111&season=%d&round=%d',
-                $round->season,
-                $round->round_number,
-            );
-
-            $response = $http->get($url);
-            if (! $response->successful()) {
-                $this->completeLog(0);
-
-                return;
-            }
-
-            $fixtures = data_get($response->json(), 'fixtures', []);
+            $fixtures = $drawPage->fixtures($http, $round->season, $round->round_number);
 
             foreach ($fixtures as $fixture) {
                 $homeNickname = data_get($fixture, 'homeTeam.nickName');
@@ -129,13 +116,8 @@ class FetchLiveScores implements ShouldBeUnique, ShouldQueue
 
     protected function fetchTryEvents(HttpScraper $http, Matchup $match, string $matchCentreUrl): int
     {
-        $url = 'https://www.nrl.com'.rtrim($matchCentreUrl, '/').'/data';
-        $response = $http->get($url);
-        if (! $response->successful()) {
-            return 0;
-        }
-
-        $data = $response->json();
+        $url = 'https://www.nrl.com' . rtrim($matchCentreUrl, '/') . '/data';
+        $data = $http->json($url, ['homeTeam', 'awayTeam']);
         $timeline = $data['timeline'] ?? [];
         $count = 0;
 
