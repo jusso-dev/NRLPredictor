@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use GuzzleHttp\Cookie\CookieJar;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
@@ -16,9 +17,16 @@ use Symfony\Component\DomCrawler\Crawler;
  */
 class HttpScraper
 {
-    public const USER_AGENT = 'NRLTryPredictor/1.0';
+    public const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
     public const TIMEOUT = 30;
     public const DOMAIN_MIN_INTERVAL = 5;
+
+    private CookieJar $cookieJar;
+
+    public function __construct()
+    {
+        $this->cookieJar = new CookieJar();
+    }
 
     public function get(string $url): Response
     {
@@ -74,9 +82,10 @@ class HttpScraper
     {
         return Http::withHeaders([
             'User-Agent' => self::USER_AGENT,
-            'Accept' => 'text/html,application/xhtml+xml,application/json',
+            'Accept' => 'application/json,text/html,application/xhtml+xml,*/*;q=0.8',
             'Accept-Language' => 'en-AU,en;q=0.9',
         ])
+        ->withOptions(['cookies' => $this->cookieJar])
         ->timeout(self::TIMEOUT)
         ->retry(2, 1000, throw: false);
     }
