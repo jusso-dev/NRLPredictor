@@ -60,6 +60,13 @@ class HttpScraper
         }
 
         $contentType = Str::lower((string) $response->header('Content-Type'));
+        if (! str_contains($contentType, 'json') && str_contains($url, 'nrl.com')) {
+            // nrl.com uses an SSO probe: first request sets a session cookie and
+            // returns HTML; the second request within the same cookie jar gets JSON.
+            $response = $this->get($url);
+            $contentType = Str::lower((string) $response->header('Content-Type'));
+        }
+
         if (! str_contains($contentType, 'json')) {
             throw new RuntimeException("Expected JSON from {$url}; received {$contentType} instead");
         }
