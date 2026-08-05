@@ -98,9 +98,21 @@ MySQL 8.0. All migrations in `database/migrations/`. Teams must be seeded via `T
 
 Odds are stored in `odds_snapshots` and enriched onto multi-bet legs. The scheduler runs every 4 hours to conserve API credits. Env var: `ODDS_API_KEY`.
 
+## API authentication
+
+`App\Http\Middleware\ApiKeyAuth` (appended to the `api` middleware group in `bootstrap/app.php`) guards every `/api` route with a shared secret from `API_KEY` (or `API_KEYS`, comma separated, for rotation). Clients send `X-API-Key: <key>` or `Authorization: Bearer <key>`; failures return 401.
+
+- **Blank `API_KEY` leaves the API open** — that keeps local dev and the docker-compose default working. Set it before exposing the app beyond localhost.
+- The browser chat page posts to `POST /chat/send` (web group, session + CSRF), *not* `/api/chat`, so it keeps working when a key is set. `/api/chat` stays key-protected for external clients.
+- Tests: `tests/Feature/ApiKeyAuthTest.php`.
+
+## iOS app
+
+`ios/` holds a native SwiftUI client (fixtures, match detail, odds, clubs/players, multi builder) generated with XcodeGen from `ios/project.yml`. It talks to `/api/v1` only, stores the API key in the device Keychain, and mirrors the web design tokens. See `ios/README.md`.
+
 ## Environment
 
-Key env vars for AI features: `CODEX_MODEL` (blank = use `~/.codex/config.toml` default), `CODEX_TIMEOUT_SECONDS`. `ODDS_API_KEY` enables bookmaker odds integration. `APP_TIMEZONE` must be `Australia/Sydney` in every PHP container — kickoff-window gates compare Sydney kickoff times against `now()`.
+Key env vars for AI features: `CODEX_MODEL` (blank = use `~/.codex/config.toml` default), `CODEX_TIMEOUT_SECONDS`. `ODDS_API_KEY` enables bookmaker odds integration. `API_KEY` locks down the JSON API. `APP_TIMEZONE` must be `Australia/Sydney` in every PHP container — kickoff-window gates compare Sydney kickoff times against `now()`.
 
 ## AI agent (Codex CLI via ChatGPT Pro)
 

@@ -184,7 +184,26 @@ Built with **Livewire 3** + **Tailwind CSS**. Dark/light theme toggle.
 
 ## Public REST API
 
-All endpoints are under `/api/v1/`. No authentication required.
+All endpoints are under `/api/v1/`.
+
+### Authentication
+
+Set `API_KEY` in `.env` to require a shared secret on every `/api` route:
+
+```bash
+API_KEY=$(openssl rand -hex 32)
+```
+
+Clients then send either header:
+
+```
+X-API-Key: <key>
+Authorization: Bearer <key>
+```
+
+Anything else gets `401 {"message": "Invalid or missing API key."}`. Rotate without downtime by listing both keys: `API_KEYS=old-key,new-key`.
+
+Leave `API_KEY` blank and the API stays open — convenient locally, but set it before exposing the app. The browser chat page posts to the session/CSRF-protected `POST /chat/send`, so it is unaffected either way.
 
 ### Rounds
 
@@ -264,6 +283,8 @@ See `.env.example` for full list. Key variables:
 | `DB_*` | Yes | MySQL connection (defaults work with docker compose) |
 | `CODEX_MODEL` | No | Codex CLI model (blank = use `~/.codex/config.toml` default) |
 | `CODEX_TIMEOUT_SECONDS` | No | Per-call timeout for `codex exec` (default: 300) |
+| `ODDS_API_KEY` | No | The Odds API key — enables bookmaker odds + player props |
+| `API_KEY` | No | Shared secret required on every `/api` route (blank = open) |
 
 ## Tech stack
 
@@ -286,6 +307,10 @@ app/
 ├── Models/               Eloquent models
 └── Services/             SignalCalculator, WinPredictor, MultiBetBuilder,
                           CodexClient, AgentContext, TryPredictionAgent, …
+
+ios/                      Native SwiftUI client (see ios/README.md)
+├── project.yml           XcodeGen project definition
+└── NRLPredictor/         App, Core, Design, Models, Features
 ```
 
 > One naming quirk: the Eloquent model is **`Matchup`** because `match` is a reserved word in PHP 8.0+. The underlying table is still `matches`.
@@ -295,7 +320,7 @@ app/
 - `.env` is **gitignored**. Treat the bundled `.env.example` as scaffolding only.
 - Default DB credentials in `docker-compose.yml` (`nrl_secret`, `root_secret`) are for local development. Override `DB_PASSWORD` and `DB_ROOT_PASSWORD` before deploying anywhere reachable from the public internet.
 - `~/.codex/auth.json` holds a ChatGPT refresh token — never commit it or bake it into an image; docker-compose mounts it at runtime.
-- The public REST API is intentionally unauthenticated for portfolio/demo purposes. Add a token or rate-limiter (`Route::middleware('throttle:60,1')`) before exposing it.
+- The REST API is unauthenticated until you set `API_KEY` — do that before exposing it, and consider adding a rate limiter (`Route::middleware('throttle:60,1')`) too.
 - Scrapers hit `nrl.com` public JSON endpoints — be a polite citizen and don't crank the schedule intervals down without good reason.
 
 ## Roadmap
