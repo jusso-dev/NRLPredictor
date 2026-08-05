@@ -44,7 +44,7 @@
 		54D29D498D4878FC5EBA69C7 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
 		5858BACD1D601D66BA88A8A1 /* Loadable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Loadable.swift; sourceTree = "<group>"; };
 		5BE9C93C37C86FD5FD1CD1B9 /* MatchDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchDetailView.swift; sourceTree = "<group>"; };
-		640FD083708A2256DC8C19F3 /* NRLPredictor.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = NRLPredictor.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		640FD083708A2256DC8C19F3 /* NRL Predictor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "NRL Predictor.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6C6D02FD3FB6D1CA18C6B3B0 /* PlayerDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerDetailView.swift; sourceTree = "<group>"; };
 		80451822EB668DFC16859BF9 /* MultiBuilderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiBuilderView.swift; sourceTree = "<group>"; };
 		86711A763555D2D8C62041BB /* OddsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OddsView.swift; sourceTree = "<group>"; };
@@ -175,7 +175,7 @@
 		B80F85225F267B50657C5AA7 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				640FD083708A2256DC8C19F3 /* NRLPredictor.app */,
+				640FD083708A2256DC8C19F3 /* NRL Predictor.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -220,7 +220,7 @@
 			packageProductDependencies = (
 			);
 			productName = NRLPredictor;
-			productReference = 640FD083708A2256DC8C19F3 /* NRLPredictor.app */;
+			productReference = 640FD083708A2256DC8C19F3 /* NRL Predictor.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -376,6 +376,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 83ZX28V765;
 				INFOPLIST_FILE = NRLPredictor/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -457,6 +458,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 83ZX28V765;
 				INFOPLIST_FILE = NRLPredictor/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

@@ -34,7 +34,7 @@ running on a device.
 Open **Settings** (gear icon, Round tab):
 
 - **API base URL** — `http://localhost:8000` on the simulator; on a device use the
-  Mac's LAN address, e.g. `http://192.168.0.10:8000`. Stored in `UserDefaults`.
+  server's LAN address, e.g. `http://192.168.0.10:8000`. Stored in `UserDefaults`.
 - **API key** — must match `API_KEY` on the server. Stored in the **Keychain**
   (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`), never in preferences, and
   sent as `X-API-Key` on every request. Leave empty if the server has no key set.

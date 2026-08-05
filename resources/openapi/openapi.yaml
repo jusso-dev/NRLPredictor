@@ -37,7 +37,7 @@ servers:
         enum: [http, https]
       host:
         default: localhost:8000
-        description: Host and port the Laravel app is served on (homelab default is your-server:8001).
+        description: Host and port the Laravel app is served on.
 
 security:
   - ApiKeyAuth: []
