@@ -78,7 +78,7 @@ NRLPredictor/
 Debug builds read launch arguments so screens can be driven from the CLI:
 
 ```bash
-xcrun simctl launch <device> au.indigi.nrlpredictor \
+xcrun simctl launch <device> au.com.yarndigi.nrlpredictor \
   -startTab 1 \
   -startRoute match:187 \
   -api_base_url "http://localhost:8000" \

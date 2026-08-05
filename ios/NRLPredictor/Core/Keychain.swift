@@ -7,7 +7,7 @@ import Security
 /// `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, so it is readable by
 /// background refreshes after the first unlock but never leaves the device.
 enum Keychain {
-    static let service = "au.indigi.nrlpredictor"
+    static let service = "au.com.yarndigi.nrlpredictor"
 
     static func read(_ account: String) -> String? {
         let query: [String: Any] = [
