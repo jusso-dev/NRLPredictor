@@ -79,7 +79,8 @@ struct MatchDetailView: View {
                         ForEach(changes) { change in
                             HStack(alignment: .top, spacing: 10) {
                                 Chip(change.label, tone: change.tone)
-                                    .frame(width: 78, alignment: .leading)
+                                    .fixedSize()
+                                    .frame(width: 84, alignment: .leading)
 
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(change.summary)
