@@ -19,6 +19,9 @@ x-app-env: &app-env
   # jobs that are still running, causing duplicate runs and phantom failures.
   DB_QUEUE_RETRY_AFTER: 660
   ODDS_API_KEY: ${ODDS_API_KEY}
+  # Shared secret for the JSON API. There is no .env inside the image
+  # (.dockerignore excludes it), so every config value must be passed here.
+  API_KEY: ${API_KEY:-}
   CODEX_HOME: /root/.codex
   CODEX_MODEL: ${CODEX_MODEL:-}
   CODEX_TIMEOUT_SECONDS: ${CODEX_TIMEOUT_SECONDS:-300}
