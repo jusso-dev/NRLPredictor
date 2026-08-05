@@ -137,7 +137,7 @@ function chatWidget(initial) {
             }));
 
             // Async fetch — UI stays responsive
-            fetch('/api/chat', {
+            fetch('/chat/send', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

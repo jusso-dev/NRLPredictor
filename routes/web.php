@@ -10,6 +10,8 @@ use App\Livewire\MatchDetail;
 use App\Livewire\Calibration;
 use App\Livewire\Learning;
 use App\Livewire\Methodology;
+use App\Http\Controllers\ChatController;
+use App\Http\Middleware\RgDisclaimer;
 use App\Livewire\MultiBet;
 use Illuminate\Support\Facades\Route;
 
@@ -24,3 +26,10 @@ Route::get('/calibration', Calibration::class)->name('calibration');
 Route::get('/learning', Learning::class)->name('learning');
 Route::get('/jobs', Jobs::class)->name('jobs');
 Route::get('/logs', Logs::class)->name('logs');
+
+// The chat page posts here from the browser: session + CSRF protected, so it
+// does not need the API key that App\Http\Middleware\ApiKeyAuth enforces on
+// /api/chat for external clients.
+Route::post('/chat/send', [ChatController::class, 'send'])
+    ->middleware(RgDisclaimer::class)
+    ->name('chat.send');

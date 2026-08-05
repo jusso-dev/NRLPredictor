@@ -39,6 +39,13 @@ return [
         'key' => env('ODDS_API_KEY'),
     ],
 
+    'api' => [
+        // Shared secret(s) required by App\Http\Middleware\ApiKeyAuth on every
+        // /api route. Comma separated to allow rotation. Leave blank to keep
+        // the API open (local development default).
+        'keys' => env('API_KEYS', env('API_KEY', '')),
+    ],
+
     'codex' => [
         // OpenAI Codex CLI, run in-process via `codex exec`. Auth comes from
         // the ChatGPT Pro OAuth session in $CODEX_HOME (docker-compose mounts

@@ -33,7 +33,7 @@ services:
       MYSQL_PASSWORD: ${DB_PASSWORD:-nrl_secret}
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_secret}
     ports:
-      - "3307:3306"
+      - "${DB_PUBLISHED_PORT:-3307}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:
@@ -52,13 +52,14 @@ services:
         condition: service_healthy
     environment:
       <<: *app-env
-      APP_URL: http://localhost:8000
+      APP_URL: ${APP_URL:-http://localhost:8000}
     volumes:
       # Codex CLI auth (ChatGPT Pro OAuth). Must stay read-write: the refresh
       # token rotates inside this directory.
       - ${HOME}/.codex:/root/.codex
     ports:
-      - "0.0.0.0:8000:8000"
+      # Override APP_PORT in .env when 8000 is taken on the host.
+      - "0.0.0.0:${APP_PORT:-8000}:8000"
     command:
       - sh
       - -c
