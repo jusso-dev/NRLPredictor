@@ -59,6 +59,19 @@ class ApiKeyAuthTest extends TestCase
         $this->getJson(self::ENDPOINT, [ApiKeyAuth::HEADER => 'retired-key'])->assertStatus(401);
     }
 
+    public function test_keys_tolerate_padding_so_a_pasted_env_line_still_works(): void
+    {
+        config(['services.api.keys' => "  ios-key ,\thermes-key  "]);
+
+        $this->getJson(self::ENDPOINT, [ApiKeyAuth::HEADER => 'ios-key'])->assertOk();
+        $this->getJson(self::ENDPOINT, [ApiKeyAuth::HEADER => 'hermes-key'])->assertOk();
+
+        // The presented key is trimmed as well, so a header pasted with stray
+        // whitespace still authenticates.
+        $this->getJson(self::ENDPOINT, [ApiKeyAuth::HEADER => ' ios-key '])->assertOk();
+        $this->getJson(self::ENDPOINT, [ApiKeyAuth::HEADER => 'ios-key-2'])->assertStatus(401);
+    }
+
     public function test_chat_endpoint_is_protected_too(): void
     {
         config(['services.api.keys' => 'super-secret']);

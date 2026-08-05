@@ -43,7 +43,10 @@ return [
         // Shared secret(s) required by App\Http\Middleware\ApiKeyAuth on every
         // /api route. Comma separated to allow rotation. Leave blank to keep
         // the API open (local development default).
-        'keys' => env('API_KEYS', env('API_KEY', '')),
+        // `?:` not a default argument: docker-compose passes API_KEYS through as an
+        // empty string when it is unset, which would otherwise shadow API_KEY and
+        // silently leave the API open.
+        'keys' => env('API_KEYS') ?: env('API_KEY', ''),
     ],
 
     'codex' => [
