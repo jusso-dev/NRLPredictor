@@ -72,6 +72,15 @@ struct MultiBuilderView: View {
             Text("Signal-driven multi-bet suggestions combining match winners and try scorers.")
                 .font(.system(size: 13))
                 .foregroundStyle(Palette.muted)
+
+            NavigationLink(value: Route.guide) {
+                HStack(spacing: 4) {
+                    Image(systemName: "questionmark.circle")
+                    Text("How multis are built")
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Palette.accentBright)
+            }
         }
     }
 

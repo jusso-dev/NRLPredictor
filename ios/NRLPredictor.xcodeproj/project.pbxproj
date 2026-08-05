@@ -23,10 +23,12 @@
 		6D6C6A71BED40B30A8946CCC /* Loadable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5858BACD1D601D66BA88A8A1 /* Loadable.swift */; };
 		73B0A312102C4B3803E82692 /* NRLPredictorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBC71A27966C20E4F3EF0A67 /* NRLPredictorApp.swift */; };
 		82EFFB859416DDB8892220C3 /* TeamsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22C7D5EFEDAAD14813B8C635 /* TeamsView.swift */; };
+		949B10627B9D50CAA56CCDF5 /* Methodology.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F3C7A61BD59647403F97084 /* Methodology.swift */; };
 		984C9EB296F927953D8A0CBC /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54D29D498D4878FC5EBA69C7 /* Typography.swift */; };
 		9B3D86202365B634E001CD44 /* FixturesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A34381EF6848184E65C7319 /* FixturesView.swift */; };
 		9DC2E22881CD793DB4D10289 /* MatchCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBDDC01D28059B92AB33F5A0 /* MatchCard.swift */; };
 		B3339F2C1FCCE7E9758B0E6C /* Formatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6894B43EC57842C56F3C652 /* Formatters.swift */; };
+		BAB693E5AA13D0004E00BAF9 /* GuideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAA77457E7CDFDA34D668344 /* GuideView.swift */; };
 		BB2CFCC1DC06665711F8025B /* MultiBet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E70E1DF0D30460B9C760C4C3 /* MultiBet.swift */; };
 		D9573EA730B2C026307D5EB0 /* TeamColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D3A106632591B08F6FC1CE5 /* TeamColors.swift */; };
 		E678C22D159318A670BE63B0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9CED644CAF6D6094FA753E /* SettingsView.swift */; };
@@ -42,15 +44,17 @@
 		54D29D498D4878FC5EBA69C7 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
 		5858BACD1D601D66BA88A8A1 /* Loadable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Loadable.swift; sourceTree = "<group>"; };
 		5BE9C93C37C86FD5FD1CD1B9 /* MatchDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchDetailView.swift; sourceTree = "<group>"; };
-		640FD083708A2256DC8C19F3 /* NRL Predictor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "NRL Predictor.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		640FD083708A2256DC8C19F3 /* NRLPredictor.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = NRLPredictor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6C6D02FD3FB6D1CA18C6B3B0 /* PlayerDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerDetailView.swift; sourceTree = "<group>"; };
 		80451822EB668DFC16859BF9 /* MultiBuilderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiBuilderView.swift; sourceTree = "<group>"; };
 		86711A763555D2D8C62041BB /* OddsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OddsView.swift; sourceTree = "<group>"; };
 		8C1C938121BCD94C93EDDF93 /* Palette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Palette.swift; sourceTree = "<group>"; };
 		8EB718EDE3DB4828CF3995C7 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		8F3C7A61BD59647403F97084 /* Methodology.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Methodology.swift; sourceTree = "<group>"; };
 		90E80BF890791DAD71DB7C12 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		A75ACBC220AAD53F27B2A6E0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A9CBC8ACB4BE9ED9991A19F5 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
+		BAA77457E7CDFDA34D668344 /* GuideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideView.swift; sourceTree = "<group>"; };
 		BBDDC01D28059B92AB33F5A0 /* MatchCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchCard.swift; sourceTree = "<group>"; };
 		D899A3362C86C2444E0CCD07 /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		DCEC68EEFF505DB999D861BE /* Odds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Odds.swift; sourceTree = "<group>"; };
@@ -67,6 +71,14 @@
 				80451822EB668DFC16859BF9 /* MultiBuilderView.swift */,
 			);
 			path = Multi;
+			sourceTree = "<group>";
+		};
+		32806F2ACB538ED3B70AA59C /* Guide */ = {
+			isa = PBXGroup;
+			children = (
+				BAA77457E7CDFDA34D668344 /* GuideView.swift */,
+			);
+			path = Guide;
 			sourceTree = "<group>";
 		};
 		65E63E650B013983C93E6E44 /* Teams */ = {
@@ -91,6 +103,7 @@
 			isa = PBXGroup;
 			children = (
 				8A93B2B25CCE33940397A558 /* Fixtures */,
+				32806F2ACB538ED3B70AA59C /* Guide */,
 				12194D6978BC37A0851C351D /* Multi */,
 				737574AF69EA28E38E96613A /* Odds */,
 				811EB734E03AA276062CA959 /* Settings */,
@@ -162,7 +175,7 @@
 		B80F85225F267B50657C5AA7 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				640FD083708A2256DC8C19F3 /* NRL Predictor.app */,
+				640FD083708A2256DC8C19F3 /* NRLPredictor.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -181,6 +194,7 @@
 		E6465E7895A0DB80B0CD901A /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				8F3C7A61BD59647403F97084 /* Methodology.swift */,
 				90E80BF890791DAD71DB7C12 /* Models.swift */,
 				E70E1DF0D30460B9C760C4C3 /* MultiBet.swift */,
 				DCEC68EEFF505DB999D861BE /* Odds.swift */,
@@ -206,7 +220,7 @@
 			packageProductDependencies = (
 			);
 			productName = NRLPredictor;
-			productReference = 640FD083708A2256DC8C19F3 /* NRL Predictor.app */;
+			productReference = 640FD083708A2256DC8C19F3 /* NRLPredictor.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -262,10 +276,12 @@
 				5DEFB2253BD0EC62FD4D8930 /* Components.swift in Sources */,
 				9B3D86202365B634E001CD44 /* FixturesView.swift in Sources */,
 				B3339F2C1FCCE7E9758B0E6C /* Formatters.swift in Sources */,
+				BAB693E5AA13D0004E00BAF9 /* GuideView.swift in Sources */,
 				621C9C5690B85B6C91143DEB /* Keychain.swift in Sources */,
 				6D6C6A71BED40B30A8946CCC /* Loadable.swift in Sources */,
 				9DC2E22881CD793DB4D10289 /* MatchCard.swift in Sources */,
 				6088C6555D243786E936B1E9 /* MatchDetailView.swift in Sources */,
+				949B10627B9D50CAA56CCDF5 /* Methodology.swift in Sources */,
 				4229B1D2CA303E6129814192 /* Models.swift in Sources */,
 				BB2CFCC1DC06665711F8025B /* MultiBet.swift in Sources */,
 				422C3544EA432F1DDA209B1E /* MultiBuilderView.swift in Sources */,
@@ -360,7 +376,6 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 83ZX28V765;
 				INFOPLIST_FILE = NRLPredictor/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -442,7 +457,6 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 83ZX28V765;
 				INFOPLIST_FILE = NRLPredictor/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

@@ -53,6 +53,7 @@ HTTP on localhost/LAN. Remove `NSAppTransportSecurity` once you front it with HT
 | **Multi** | Risk profile (safe/balanced/value) + leg count → `GET /api/v1/multi-bet`. Summary card, then a slip: toggle legs in or out, enter a stake, and see combined bookmaker odds, model probability and potential return recalculated locally. Share the slip as text. |
 | **Odds** | Per-match head-to-head, line, totals and anytime try scorer prices by bookmaker. |
 | **Teams** | All 17 clubs in club colours → squad (sortable) → player career/season splits, injury status, venue and opponent records. |
+| **How to use** | Orientation guide reached from the `?` in the Round tab, a first-run card, and a link on the Multi tab. Plain-language sections (start here, reading a match card, chip legend, slip mechanics) are combined with live numbers from `/api/v1/methodology` — score tiers, signal weights, position weights, risk profiles, refresh cadence — so the copy cannot drift from the model. |
 
 ## Design
 

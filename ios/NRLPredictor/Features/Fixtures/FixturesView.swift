@@ -6,6 +6,8 @@ struct FixturesView: View {
     @State private var leaderboard = Loadable<RoundScopedResponse<PredictionRow>>()
     @State private var selectedRound: RoundInfo?
     @State private var showSettings = false
+    /// Shown until a new user opens the guide or dismisses it.
+    @AppStorage("has_seen_guide") private var hasSeenGuide = false
 
     private var roundList: [RoundInfo] { rounds.value?.data ?? [] }
 
@@ -32,6 +34,7 @@ struct FixturesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 header
+                if !hasSeenGuide { guidePrompt }
                 matchesSection
                 leaderboardSection
                 ResponsibleGamblingFooter()
@@ -42,8 +45,14 @@ struct FixturesView: View {
         .toolbar {
             ToolbarItem(placement: .principal) { MastheadTitle(title: "NRL Try Predictor") }
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showSettings = true } label: { Image(systemName: "gearshape") }
-                    .tint(Palette.muted)
+                HStack(spacing: 14) {
+                    NavigationLink(value: Route.guide) {
+                        Image(systemName: "questionmark.circle")
+                    }
+                    .simultaneousGesture(TapGesture().onEnded { hasSeenGuide = true })
+                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                }
+                .tint(Palette.muted)
             }
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
@@ -91,6 +100,44 @@ struct FixturesView: View {
                         Text("\(Fmt.kickoffShort(next.kickoffAt) ?? "") AEST · \(relative)")
                             .font(.numeric(11))
                             .foregroundStyle(Palette.muted)
+                    }
+                }
+            }
+        }
+    }
+
+    private var guidePrompt: some View {
+        Card(tint: Palette.accent) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Palette.accentBright)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("New here?")
+                        .displayStyle(17)
+                        .foregroundStyle(Palette.heading)
+                    Text("A two-minute guide covers what the scores mean, how to read a match, and how the multi builder works.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.secondary)
+
+                    HStack(spacing: 10) {
+                        NavigationLink(value: Route.guide) {
+                            Text("Read the guide")
+                                .font(.system(size: 12, weight: .semibold))
+                                .tracking(0.6)
+                                .textCase(.uppercase)
+                                .foregroundStyle(Color.black)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 9)
+                                .background(Palette.accent, in: .rect(cornerRadius: 6))
+                        }
+                        .simultaneousGesture(TapGesture().onEnded { hasSeenGuide = true })
+
+                        Button("Dismiss") {
+                            withAnimation(.snappy(duration: 0.2)) { hasSeenGuide = true }
+                        }
+                        .buttonStyle(GhostButtonStyle())
                     }
                 }
             }

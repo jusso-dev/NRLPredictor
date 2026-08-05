@@ -5,6 +5,7 @@ enum Route: Hashable {
     case match(Int)
     case team(Int)
     case player(Int)
+    case guide
 }
 
 extension View {
@@ -22,6 +23,7 @@ extension View {
                 case .match(let id): MatchDetailView(matchId: id)
                 case .team(let id): TeamDetailView(teamId: id)
                 case .player(let id): PlayerDetailView(playerId: id)
+                case .guide: GuideView()
                 }
             }
     }
@@ -44,6 +46,7 @@ struct RootView: View {
     static var debugRoute: Route? {
         #if DEBUG
         guard let raw = UserDefaults.standard.string(forKey: "startRoute") else { return nil }
+        if raw == "guide" { return .guide }
         let parts = raw.split(separator: ":")
         guard parts.count == 2, let id = Int(parts[1]) else { return nil }
         switch parts[0] {
