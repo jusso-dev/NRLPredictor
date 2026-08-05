@@ -47,6 +47,19 @@ class OpenApiSpecTest extends TestCase
             ->assertHeader('Content-Disposition', 'attachment; filename="nrl-predictor-openapi.json"');
     }
 
+    public function test_yaml_parser_is_a_runtime_dependency(): void
+    {
+        // The production image runs `composer install --no-dev`, so a dev-only
+        // symfony/yaml would 500 on /api/openapi.json in Docker while passing here.
+        $composer = json_decode(file_get_contents(base_path('composer.json')), true);
+
+        $this->assertArrayHasKey(
+            'symfony/yaml',
+            $composer['require'],
+            'symfony/yaml must be in require, not require-dev: the JSON spec endpoint parses YAML at runtime.'
+        );
+    }
+
     public function test_docs_page_renders(): void
     {
         config(['services.api.keys' => 'super-secret']);

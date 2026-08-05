@@ -11,7 +11,8 @@
         "laravel/tinker": "^2.9",
         "livewire/livewire": "^3.0",
         "symfony/css-selector": "^7.4",
-        "symfony/dom-crawler": "^7.4"
+        "symfony/dom-crawler": "^7.4",
+        "symfony/yaml": "^7.4"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
