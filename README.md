@@ -186,6 +186,25 @@ Built with **Livewire 3** + **Tailwind CSS**. Dark/light theme toggle.
 
 All endpoints are under `/api/v1/`.
 
+### Machine-readable spec
+
+An OpenAPI 3.1 document describes every route, schema and quirk (percent-suffixed probability strings, omitted-vs-null keys, the array-vs-object `data` on the two odds endpoints):
+
+```
+GET /api/openapi.yaml     — YAML
+GET /api/openapi.json     — JSON
+GET /api/docs             — browsable reference
+```
+
+All three are reachable **without** an API key so agents and codegen can discover the API first. Append `?download=1` for a file download:
+
+```bash
+curl -O "http://your-server:8001/api/openapi.yaml?download=1"
+curl -O "http://your-server:8001/api/openapi.json?download=1"
+```
+
+The source of truth is `resources/openapi/openapi.yaml`; `tests/Feature/OpenApiSpecTest.php` fails if it drifts from the router in either direction.
+
 ### Authentication
 
 Set `API_KEY` in `.env` to require a shared secret on every `/api` route:

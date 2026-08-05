@@ -106,6 +106,10 @@ Odds are stored in `odds_snapshots` and enriched onto multi-bet legs. The schedu
 - The browser chat page posts to `POST /chat/send` (web group, session + CSRF), *not* `/api/chat`, so it keeps working when a key is set. `/api/chat` stays key-protected for external clients.
 - Tests: `tests/Feature/ApiKeyAuthTest.php`.
 
+## OpenAPI
+
+`resources/openapi/openapi.yaml` is the hand-maintained source of truth, served by `Api\OpenApiController` at `/api/openapi.yaml`, `/api/openapi.json` (parsed with `symfony/yaml` — keep it in `require`, the image builds `--no-dev`) and `/api/docs`. Those three paths are exempt from both `ApiKeyAuth` and `RgDisclaimer` (`ApiKeyAuth::isSpecPath`) so the document stays fetchable and uncorrupted. `tests/Feature/OpenApiSpecTest.php` diffs the spec against the router both ways — add a route, add a spec entry.
+
 ## iOS app
 
 `ios/` holds a native SwiftUI client (fixtures, match detail, odds, clubs/players, multi builder) generated with XcodeGen from `ios/project.yml`. It talks to `/api/v1` only, stores the API key in the device Keychain, and mirrors the web design tokens. See `ios/README.md`.
