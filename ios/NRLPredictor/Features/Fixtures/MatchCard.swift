@@ -49,7 +49,7 @@ struct MatchCard: View {
                 .displayStyle(18)
                 .foregroundStyle(isWinner ? Palette.accentBright : Palette.heading)
             Spacer(minLength: 8)
-            if let score {
+            if match.hasScore, let score {
                 Text("\(score)")
                     .font(.numeric(20, .medium))
                     .foregroundStyle(Palette.heading)

@@ -223,7 +223,9 @@ struct Match: Decodable, Identifiable, Hashable, Sendable {
     var hasWinPrediction: Bool { winPrediction?.homeWinPct != nil }
     var homeIsPredictedWinner: Bool { winPrediction?.predictedWinnerId == homeTeam.id }
     var awayIsPredictedWinner: Bool { winPrediction?.predictedWinnerId == awayTeam.id }
-    var hasScore: Bool { homeScore != nil && awayScore != nil }
+    /// Upcoming fixtures carry 0-0 rather than nulls, so only show a score once
+    /// the match is actually under way.
+    var hasScore: Bool { status != "upcoming" && homeScore != nil && awayScore != nil }
     var title: String { "\(homeTeam.label) v \(awayTeam.label)" }
 
     func signals(side: String) -> [Signal] {
