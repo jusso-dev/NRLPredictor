@@ -26,9 +26,15 @@ struct SettingsView: View {
                                     .background(Palette.surfaceAlt, in: .rect(cornerRadius: 6))
                                     .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(Palette.border, lineWidth: 1) }
 
-                                Text("Point this at the Laravel app. On the simulator that is usually http://localhost:8000; on a device use your Mac's LAN IP, e.g. http://192.168.0.10:8000.")
+                                Text("Point this at the Laravel app — host and port only. On the simulator that is usually http://localhost:8000; on a device use the server's LAN address, e.g. http://192.168.0.10:8001.")
                                     .font(.system(size: 12))
                                     .foregroundStyle(Palette.muted)
+
+                                if APIConfig.normalize(baseURL) != baseURL.trimmingCharacters(in: .whitespacesAndNewlines) {
+                                    Text("Requests will use \(APIConfig.normalize(baseURL)) — a trailing slash or /api path would otherwise produce 404s.")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(Palette.orange)
+                                }
 
                                 HStack(spacing: 10) {
                                     Button(isProbing ? "Checking…" : "Test connection") {

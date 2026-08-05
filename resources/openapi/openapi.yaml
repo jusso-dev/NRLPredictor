@@ -1,0 +1,1049 @@
+openapi: 3.1.0
+info:
+  title: NRL Try Predictor API
+  version: "1.0.0"
+  summary: Try-scorer and match-winner predictions, fixtures, odds and multi-bet suggestions for the NRL.
+  description: |
+    Read-only JSON API over scraped NRL data plus the app's own prediction models.
+
+    **Authentication.** When `API_KEY` is set on the server, every `/api` route requires
+    the key as either `X-API-Key: <key>` or `Authorization: Bearer <key>`; anything else
+    returns `401`. When `API_KEY` is blank the API is open. The spec and docs endpoints
+    (`/api/openapi.yaml`, `/api/openapi.json`, `/api/docs`) are always reachable without a key.
+
+    **Conventions.**
+    - Every response carries a top-level `responsible_gambling` string, injected by middleware.
+    - `kickoff_at` / `captured_at` are ISO-8601 with a UTC offset (`2026-08-08T19:35:00+10:00`),
+      never `Z`-suffixed and never with fractional seconds. Round dates are plain `YYYY-MM-DD`.
+    - Implied probabilities are **percent-suffixed strings** (`"41.7%"`), not numbers.
+    - `point` (spread/total line) is a decimal that MySQL returns as a string (`"-4.50"`).
+    - Optional keys are **omitted** rather than null in several payloads, so treat everything
+      not marked `required` as possibly absent.
+    - There is no pagination anywhere. `/predictions/leaderboard` is hard-capped at 30 rows.
+    - Missing data returns `200` with an empty `data`; only an unknown path parameter gives `404`.
+  contact:
+    name: NRL Try Predictor
+    url: https://github.com/jusso-dev/NRLPredictor
+  license:
+    name: MIT
+    url: https://github.com/jusso-dev/NRLPredictor/blob/main/LICENSE
+
+servers:
+  - url: "{scheme}://{host}"
+    description: Deployment host
+    variables:
+      scheme:
+        default: http
+        enum: [http, https]
+      host:
+        default: localhost:8000
+        description: Host and port the Laravel app is served on (homelab default is your-server:8001).
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+
+tags:
+  - name: Meta
+    description: Spec, docs and model methodology.
+  - name: Rounds
+    description: Season rounds and which one is current.
+  - name: Matches
+    description: Fixtures, results and win predictions.
+  - name: Predictions
+    description: Try-scorer predictions and the round leaderboard.
+  - name: Teams
+    description: Clubs and their squads.
+  - name: Players
+    description: Player career, season, venue and opponent splits.
+  - name: Odds
+    description: Bookmaker markets captured from The Odds API.
+  - name: Multi-bet
+    description: Generated multi-bet suggestions.
+  - name: Chat
+    description: Natural-language analyst backed by the Codex CLI.
+
+paths:
+  /api/openapi.yaml:
+    get:
+      tags: [Meta]
+      summary: Download this specification as YAML
+      operationId: getOpenApiYaml
+      security: []
+      responses:
+        "200":
+          description: The OpenAPI document.
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+  /api/openapi.json:
+    get:
+      tags: [Meta]
+      summary: Download this specification as JSON
+      operationId: getOpenApiJson
+      security: []
+      responses:
+        "200":
+          description: The OpenAPI document.
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/docs:
+    get:
+      tags: [Meta]
+      summary: Browsable API documentation
+      operationId: getDocs
+      security: []
+      responses:
+        "200":
+          description: HTML documentation page.
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /api/v1/rounds:
+    get:
+      tags: [Rounds]
+      summary: All rounds in the current season
+      operationId: listRounds
+      responses:
+        "200":
+          description: Rounds ordered by round number.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Round" }
+                  responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/rounds/current:
+    get:
+      tags: [Rounds]
+      summary: The round the app currently considers active
+      description: |
+        Resolution order: a round whose date window contains today (unless every match in it
+        is complete, in which case the next round wins), then the next upcoming round, then
+        the `is_current` flag, then the latest round. `data` is `null` when no rounds exist.
+      operationId: getCurrentRound
+      responses:
+        "200":
+          description: The current round, or null.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    oneOf:
+                      - $ref: "#/components/schemas/Round"
+                      - type: "null"
+                  responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/matches:
+    get:
+      tags: [Matches]
+      summary: Matches, optionally filtered to one round
+      description: |
+        Without `round` this returns **every** match across every season. `season` is only
+        used to resolve `round`. An unknown round yields an empty `data` array.
+      operationId: listMatches
+      parameters:
+        - name: round
+          in: query
+          required: false
+          description: Round number to filter by.
+          schema: { type: integer, minimum: 1 }
+          example: 23
+        - name: season
+          in: query
+          required: false
+          description: Season the round belongs to. Defaults to the server's current year.
+          schema: { type: integer }
+          example: 2026
+      responses:
+        "200":
+          description: Matches ordered by kickoff.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/MatchSummary" }
+                  responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/matches/current:
+    get:
+      tags: [Matches]
+      summary: Matches in the current round
+      operationId: listCurrentMatches
+      responses:
+        "200":
+          description: |
+            Matches ordered by kickoff. `round` and `season` are omitted entirely when there
+            is no current round.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  round: { type: integer, examples: [23] }
+                  season: { type: integer, examples: [2026] }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/MatchSummary" }
+                  responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/matches/{match}:
+    get:
+      tags: [Matches]
+      summary: One match, with win signals, odds and team lists
+      operationId: getMatch
+      parameters:
+        - $ref: "#/components/parameters/MatchId"
+      responses:
+        "200":
+          description: Match detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/MatchDetail" }
+                  responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/matches/{match}/predictions:
+    get:
+      tags: [Predictions]
+      summary: Try-scorer predictions for one match
+      description: Up to 15 rows ordered by rank. Empty until an analysis pass has run.
+      operationId: getMatchPredictions
+      parameters:
+        - $ref: "#/components/parameters/MatchId"
+      responses:
+        "200":
+          description: Predictions ordered by rank.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Prediction" }
+                  responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/predictions/leaderboard:
+    get:
+      tags: [Predictions]
+      summary: Top predictions across the current round
+      description: |
+        Ordered by score descending, capped at 30 rows. Note `rank` is the rank **within its
+        match**, not the leaderboard position, so duplicate ranks are expected.
+      operationId: getLeaderboard
+      responses:
+        "200":
+          description: Leaderboard rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  round: { type: integer, examples: [23] }
+                  season: { type: integer, examples: [2026] }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/LeaderboardEntry" }
+                  responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/teams:
+    get:
+      tags: [Teams]
+      summary: All clubs
+      operationId: listTeams
+      responses:
+        "200":
+          description: Clubs ordered by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Team" }
+                  responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/teams/{team}:
+    get:
+      tags: [Teams]
+      summary: One club and its squad
+      operationId: getTeam
+      parameters:
+        - name: team
+          in: path
+          required: true
+          description: Numeric team id.
+          schema: { type: integer }
+          example: 1
+      responses:
+        "200":
+          description: Club with players ordered by position then name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/TeamWithSquad" }
+                  responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/players/{player}:
+    get:
+      tags: [Players]
+      summary: One player with career, season, venue and opponent splits
+      operationId: getPlayer
+      parameters:
+        - name: player
+          in: path
+          required: true
+          description: Numeric player id.
+          schema: { type: integer }
+          example: 402
+      responses:
+        "200":
+          description: Player detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/PlayerDetail" }
+                  responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/odds:
+    get:
+      tags: [Odds]
+      summary: All captured markets for the current round
+      operationId: listOdds
+      responses:
+        "200":
+          description: |
+            One entry per match that has odds. Market keys are present only when rows exist
+            for that market.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  round: { type: integer, examples: [23] }
+                  season: { type: integer, examples: [2026] }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/MatchOdds" }
+                  responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/matches/{match}/odds:
+    get:
+      tags: [Odds]
+      summary: Captured markets for one match
+      description: |
+        Unlike `/api/v1/odds`, `data` here is a single object, not an array. When the match has
+        no stored odds, `data` degrades to `{match_id: null, match: null, kickoff_at: null}`
+        while the outer `match_id` / `match` stay populated.
+      operationId: getMatchOdds
+      parameters:
+        - $ref: "#/components/parameters/MatchId"
+      responses:
+        "200":
+          description: Markets for the match.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  match_id: { type: integer, examples: [155] }
+                  match: { type: string, examples: ["Titans v Cowboys"] }
+                  data: { $ref: "#/components/schemas/MatchOdds" }
+                  responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/multi-bet:
+    get:
+      tags: [Multi-bet]
+      summary: Build a multi-bet suggestion for the current round
+      description: |
+        Combines match-winner and anytime-try-scorer legs from upcoming matches that already
+        have win predictions. Roughly 35% of slots are reserved for winners, with at most one
+        winner leg and two legs total per match.
+
+        On failure this still returns `200`, with `legs: []` and `summary: {error: "..."}`,
+        and without `round` / `season` / `risk_profile`.
+      operationId: buildMultiBet
+      parameters:
+        - name: legs
+          in: query
+          required: false
+          description: Desired leg count. Clamped server-side to 2–10.
+          schema: { type: integer, minimum: 2, maximum: 10, default: 6 }
+        - name: risk
+          in: query
+          required: false
+          description: Risk profile. Unknown values silently fall back to `balanced`.
+          schema:
+            type: string
+            enum: [safe, balanced, value]
+            default: balanced
+      responses:
+        "200":
+          description: A multi-bet suggestion, or an error summary.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MultiBet" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/methodology:
+    get:
+      tags: [Meta]
+      summary: How the models score things
+      description: Static description of signal weights, position weights and score tiers. Safe to cache.
+      operationId: getMethodology
+      responses:
+        "200":
+          description: Model documentation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Methodology" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/chat:
+    post:
+      tags: [Chat]
+      summary: Ask the NRL analyst a question
+      description: |
+        Runs the Codex CLI in-process on the server, so responses can take tens of seconds and
+        require the host to have a valid Codex session. Only the last 10 history entries are used.
+      operationId: sendChat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                  maxLength: 2000
+                  examples: ["Who are the top try scorer picks for Broncos v Storm?"]
+                history:
+                  type: array
+                  items:
+                    type: object
+                    required: [role, content]
+                    properties:
+                      role: { type: string, enum: [user, assistant] }
+                      content: { type: string }
+      responses:
+        "200":
+          description: The analyst's reply, truncated to 6000 characters.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean, examples: [true] }
+                  reply: { type: string }
+                  responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "502":
+          description: The chat agent failed or timed out.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, examples: [false] }
+                  error: { type: string, examples: ["Chat agent failed"] }
+                  responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Shared secret from the server's `API_KEY`. Omit when the server has no key configured.
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: "The same shared secret, sent as `Authorization: Bearer <key>`."
+
+  parameters:
+    MatchId:
+      name: match
+      in: path
+      required: true
+      description: Numeric match id (the `matches` table primary key).
+      schema: { type: integer }
+      example: 155
+
+  responses:
+    Unauthorized:
+      description: The API key is missing or wrong. Only returned when `API_KEY` is configured.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string, examples: ["Invalid or missing API key."] }
+    NotFound:
+      description: No record with that id.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+    ValidationError:
+      description: The request body failed validation.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+              errors:
+                type: object
+                additionalProperties:
+                  type: array
+                  items: { type: string }
+
+  schemas:
+    ResponsibleGambling:
+      type: string
+      description: Mandatory disclaimer appended to every response by middleware.
+      examples:
+        - "For informational use only. Gambling involves real financial risk. If you need support, call 1800 858 858 or visit www.betstop.gov.au."
+
+    Round:
+      type: object
+      required: [id, season, round_number]
+      properties:
+        id: { type: integer, examples: [23] }
+        season: { type: integer, examples: [2026] }
+        round_number: { type: integer, examples: [23] }
+        start_date:
+          type: [string, "null"]
+          format: date
+          examples: ["2026-08-06"]
+        end_date:
+          type: [string, "null"]
+          format: date
+          examples: ["2026-08-09"]
+
+    TeamRef:
+      type: object
+      required: [id]
+      properties:
+        id: { type: integer, examples: [15] }
+        name: { type: [string, "null"], examples: ["Gold Coast Titans"] }
+        short_name: { type: [string, "null"], examples: ["Titans"] }
+
+    Team:
+      type: object
+      required: [id, name, nrl_slug]
+      properties:
+        id: { type: integer, examples: [1] }
+        name: { type: string, examples: ["Brisbane Broncos"] }
+        short_name: { type: [string, "null"], examples: ["Broncos"] }
+        nrl_slug: { type: string, examples: ["broncos"] }
+        color_primary: { type: [string, "null"], examples: ["#6e0027"] }
+        color_secondary: { type: [string, "null"], examples: ["#fbbf15"] }
+
+    TeamWithSquad:
+      allOf:
+        - $ref: "#/components/schemas/Team"
+        - type: object
+          properties:
+            players:
+              type: array
+              items: { $ref: "#/components/schemas/SquadPlayer" }
+
+    SquadPlayer:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: integer, examples: [402] }
+        name: { type: string, examples: ["Selwyn Cobbo"] }
+        position: { $ref: "#/components/schemas/Position" }
+        career_games: { type: integer, examples: [92] }
+        career_tries: { type: integer, examples: [41] }
+        current_season_games: { type: integer, examples: [18] }
+        current_season_tries: { type: integer, examples: [12] }
+        current_season_try_rate: { type: number, format: float, examples: [0.667] }
+
+    Position:
+      type: [string, "null"]
+      description: Lowercase position slug.
+      enum: [fullback, winger, centre, five-eighth, halfback, prop, hooker, second-row, lock, null]
+
+    MatchStatus:
+      type: string
+      enum: [upcoming, live, completed]
+
+    WinPrediction:
+      type: object
+      description: Home and away percentages always total 100.
+      properties:
+        home_win_pct: { type: [integer, "null"], minimum: 0, maximum: 100, examples: [49] }
+        away_win_pct: { type: [integer, "null"], minimum: 0, maximum: 100, examples: [51] }
+        predicted_winner_id: { type: [integer, "null"], examples: [4] }
+
+    MatchSummary:
+      type: object
+      required: [id, home_team, away_team, status]
+      properties:
+        id: { type: integer, examples: [155] }
+        round: { type: [integer, "null"], examples: [23] }
+        season: { type: [integer, "null"], examples: [2026] }
+        home_team: { $ref: "#/components/schemas/TeamRef" }
+        away_team: { $ref: "#/components/schemas/TeamRef" }
+        venue: { type: [string, "null"], examples: ["Cbus Super Stadium"] }
+        kickoff_at:
+          type: [string, "null"]
+          format: date-time
+          examples: ["2026-08-06T19:50:00+10:00"]
+        kickoff_aest:
+          type: [string, "null"]
+          description: Pre-formatted Sydney-time label, `D j M H:i`.
+          examples: ["Thu 6 Aug 19:50"]
+        status: { $ref: "#/components/schemas/MatchStatus" }
+        home_score:
+          type: [integer, "null"]
+          description: Zero rather than null for fixtures that have not kicked off.
+        away_score: { type: [integer, "null"] }
+        win_prediction: { $ref: "#/components/schemas/WinPrediction" }
+
+    MatchDetail:
+      allOf:
+        - $ref: "#/components/schemas/MatchSummary"
+        - type: object
+          properties:
+            win_signals:
+              type: [array, "null"]
+              description: Home and away signals in one flat array; split on `side`.
+              items: { $ref: "#/components/schemas/WinSignal" }
+            bookmaker_odds:
+              type: object
+              description: Present only when odds rows exist. Each market key is independently optional.
+              properties:
+                match_winner:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      bookmaker: { type: string, examples: ["sportsbet"] }
+                      odds:
+                        type: array
+                        items: { type: number, format: float }
+                spreads:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      bookmaker: { type: string }
+                      odds:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            price: { type: [number, "null"], format: float }
+                            point:
+                              type: [string, number, "null"]
+                              description: Decimal line; a string under MySQL.
+                              examples: ["-2.50"]
+            team_lists:
+              type: object
+              properties:
+                home:
+                  type: array
+                  items: { $ref: "#/components/schemas/TeamListEntry" }
+                away:
+                  type: array
+                  items: { $ref: "#/components/schemas/TeamListEntry" }
+
+    TeamListEntry:
+      type: object
+      required: [player_id, position_number]
+      properties:
+        player_id: { type: integer, examples: [401] }
+        name: { type: [string, "null"], examples: ["Reece Walsh"] }
+        position: { $ref: "#/components/schemas/Position" }
+        position_number: { type: integer, minimum: 1, examples: [1] }
+
+    Signal:
+      type: object
+      description: One weighted model input. `strength` is 0–1 here.
+      required: [type, strength, description]
+      properties:
+        type: { type: string, examples: ["season_try_rate"] }
+        weight: { type: [integer, "null"], examples: [20] }
+        strength: { type: number, format: float, minimum: 0, maximum: 1, examples: [0.71] }
+        description: { type: string, examples: ["1.00 tries/game this season"] }
+
+    WinSignal:
+      allOf:
+        - $ref: "#/components/schemas/Signal"
+        - type: object
+          properties:
+            side: { type: string, enum: [home, away] }
+            team: { type: string, examples: ["Titans"] }
+
+    PredictionPlayer:
+      type: object
+      required: [id]
+      properties:
+        id: { type: integer, examples: [402] }
+        name: { type: [string, "null"], examples: ["Selwyn Cobbo"] }
+        team:
+          type: [string, "null"]
+          description: Team short name, falling back to the full name.
+          examples: ["Broncos"]
+        position: { $ref: "#/components/schemas/Position" }
+
+    Prediction:
+      type: object
+      required: [rank, player, score]
+      properties:
+        rank:
+          type: integer
+          description: Rank within the match, 1–15.
+          examples: [1]
+        player: { $ref: "#/components/schemas/PredictionPlayer" }
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Normalised within the match, so the top pick is always ~100.
+          examples: [100]
+        signals:
+          type: [array, "null"]
+          items: { $ref: "#/components/schemas/Signal" }
+        ai_reasoning: { type: [string, "null"] }
+
+    LeaderboardEntry:
+      allOf:
+        - $ref: "#/components/schemas/Prediction"
+        - type: object
+          properties:
+            match: { type: [string, "null"], examples: ["Titans v Cowboys"] }
+            match_id: { type: integer, examples: [155] }
+
+    PlayerDetail:
+      type: object
+      required: [id, name, career, season]
+      properties:
+        id: { type: integer, examples: [402] }
+        name: { type: string, examples: ["Selwyn Cobbo"] }
+        position: { $ref: "#/components/schemas/Position" }
+        team:
+          oneOf:
+            - $ref: "#/components/schemas/TeamRef"
+            - type: "null"
+        career:
+          type: object
+          properties:
+            games: { type: integer, examples: [92] }
+            tries: { type: integer, examples: [41] }
+            try_assists: { type: integer, examples: [12] }
+            line_breaks: { type: integer, examples: [33] }
+            try_rate: { type: number, format: float, examples: [0.446] }
+        season:
+          type: object
+          properties:
+            games: { type: integer, examples: [18] }
+            tries: { type: integer, examples: [12] }
+            try_rate: { type: number, format: float, examples: [0.667] }
+        injury:
+          description: The latest unresolved injury, or null.
+          oneOf:
+            - type: object
+              properties:
+                type: { type: [string, "null"], examples: ["hamstring"] }
+                status: { type: string, enum: [out, doubt, test] }
+            - type: "null"
+        venue_stats:
+          type: array
+          items:
+            type: object
+            properties:
+              venue: { type: string, examples: ["Suncorp Stadium"] }
+              games: { type: integer }
+              tries: { type: integer }
+              try_rate: { type: number, format: float }
+        opponent_stats:
+          type: array
+          items:
+            type: object
+            properties:
+              opponent:
+                type: [string, "null"]
+                description: Opponent's full club name.
+                examples: ["Melbourne Storm"]
+              games: { type: integer }
+              tries: { type: integer }
+              try_rate: { type: number, format: float }
+
+    ImpliedProbability:
+      type: string
+      description: Percentage rendered as a string with a trailing `%`.
+      examples: ["41.7%"]
+
+    OddsOutcome:
+      type: object
+      description: Falsy values are stripped, so any key here may be absent.
+      properties:
+        decimal_odds: { type: number, format: float, examples: [1.85] }
+        implied_probability: { $ref: "#/components/schemas/ImpliedProbability" }
+        point:
+          type: [string, number]
+          description: Line for spreads/totals. Absent on head-to-head markets.
+          examples: ["-2.50"]
+
+    BookmakerMarket:
+      type: object
+      required: [bookmaker, outcomes]
+      properties:
+        bookmaker: { type: string, examples: ["sportsbet"] }
+        outcomes:
+          type: array
+          items: { $ref: "#/components/schemas/OddsOutcome" }
+        captured_at: { type: [string, "null"], format: date-time }
+
+    AnytimeTryScorerOdds:
+      type: object
+      required: [bookmakers, best_odds, avg_implied_probability]
+      properties:
+        player_id: { type: [integer, "null"], examples: [402] }
+        player_name: { type: [string, "null"], examples: ["Selwyn Cobbo"] }
+        position: { $ref: "#/components/schemas/Position" }
+        team: { type: [string, "null"], examples: ["Broncos"] }
+        bookmakers:
+          type: array
+          items:
+            type: object
+            required: [bookmaker, decimal_odds, implied_probability]
+            properties:
+              bookmaker: { type: string }
+              decimal_odds: { type: number, format: float }
+              implied_probability: { $ref: "#/components/schemas/ImpliedProbability" }
+        best_odds: { type: number, format: float, examples: [2.4] }
+        avg_implied_probability: { $ref: "#/components/schemas/ImpliedProbability" }
+
+    MatchOdds:
+      type: object
+      description: Market keys appear only when rows exist for that market.
+      properties:
+        match_id: { type: [integer, "null"], examples: [155] }
+        match: { type: [string, "null"], examples: ["Titans v Cowboys"] }
+        kickoff_at: { type: [string, "null"], format: date-time }
+        match_winner:
+          type: array
+          items: { $ref: "#/components/schemas/BookmakerMarket" }
+        spreads:
+          type: array
+          items: { $ref: "#/components/schemas/BookmakerMarket" }
+        totals:
+          type: array
+          items: { $ref: "#/components/schemas/BookmakerMarket" }
+        anytime_try_scorer:
+          type: array
+          description: Sorted by best price, shortest first.
+          items: { $ref: "#/components/schemas/AnytimeTryScorerOdds" }
+
+    MultiSignal:
+      type: object
+      description: As returned on multi-bet legs — `strength` is already scaled 0–100 and `type` is space separated.
+      required: [type, strength, description, impact]
+      properties:
+        type: { type: string, examples: ["season try rate"] }
+        strength: { type: integer, minimum: 0, maximum: 100, examples: [71] }
+        description: { type: string }
+        impact: { type: number, format: float, examples: [14.2] }
+
+    LegBookmakerOdds:
+      type: object
+      required: [best_decimal_odds, best_bookmaker, implied_probability, bookmaker_count]
+      properties:
+        best_decimal_odds: { type: number, format: float, examples: [2.4] }
+        best_bookmaker: { type: string, examples: ["tab"] }
+        implied_probability: { $ref: "#/components/schemas/ImpliedProbability" }
+        bookmaker_count: { type: integer, examples: [3] }
+
+    MultiBetLeg:
+      type: object
+      description: |
+        One struct for both leg types. Null-valued keys are stripped, so `venue`, `kickoff_at`,
+        `team`, `position`, `ai_reasoning` and `bookmaker_odds` may all be absent. Value-underdog
+        legs bypass that filter and never carry `bookmaker_odds`.
+      required: [type, match_id, match, selection, probability, confidence, is_value_pick, reasoning]
+      properties:
+        type:
+          type: string
+          enum: [match_winner, anytime_try_scorer]
+        match_id: { type: integer, examples: [155] }
+        match: { type: string, examples: ["Titans v Cowboys"] }
+        venue: { type: [string, "null"] }
+        kickoff_at: { type: [string, "null"], format: date-time }
+        selection:
+          type: string
+          description: Team short name for winner legs, player name for try-scorer legs.
+          examples: ["Cowboys"]
+        selection_team_id: { type: integer, description: Winner legs only. }
+        selection_player_id: { type: integer, description: Try-scorer legs only. }
+        team: { type: [string, "null"], description: Try-scorer legs only. }
+        position: { $ref: "#/components/schemas/Position" }
+        rank_in_match: { type: integer, description: Try-scorer legs only. }
+        prediction_score: { type: integer, description: Try-scorer legs only. }
+        probability:
+          type: integer
+          description: Win percentage for winner legs; estimated try probability (10–80) for try-scorer legs.
+          examples: [62]
+        confidence: { type: integer, minimum: 20, maximum: 95, examples: [85] }
+        is_value_pick: { type: boolean }
+        reasoning: { type: string }
+        signals:
+          type: array
+          maxItems: 4
+          items: { $ref: "#/components/schemas/MultiSignal" }
+        ai_reasoning: { type: [string, "null"] }
+        bookmaker_odds: { $ref: "#/components/schemas/LegBookmakerOdds" }
+
+    MultiBet:
+      type: object
+      required: [legs, summary]
+      properties:
+        round: { type: integer, examples: [23] }
+        season: { type: integer, examples: [2026] }
+        risk_profile:
+          type: string
+          enum: [safe, balanced, value]
+        legs:
+          type: array
+          items: { $ref: "#/components/schemas/MultiBetLeg" }
+        summary:
+          type: object
+          description: Carries only `error` when no multi could be built.
+          properties:
+            total_legs: { type: integer, examples: [6] }
+            combined_probability_pct:
+              type: number
+              format: float
+              description: Product of the leg probabilities, assuming independence.
+              examples: [6.28]
+            overall_confidence: { type: integer, examples: [84] }
+            confidence_label: { type: string, examples: ["HIGH — Strong signal alignment across legs"] }
+            recommendation: { type: string }
+            error: { type: string, examples: ["No current round found"] }
+        responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
+
+    Methodology:
+      type: object
+      properties:
+        try_scorer_prediction:
+          type: object
+          properties:
+            description: { type: string }
+            max_raw_score: { type: integer, examples: [452] }
+            signals:
+              type: array
+              description: Sorted by weight, descending.
+              items:
+                type: object
+                properties:
+                  type: { type: string }
+                  weight: { type: integer }
+                  pct_of_total: { type: number, format: float }
+            position_weights:
+              type: object
+              additionalProperties: { type: number, format: float }
+            score_tiers:
+              type: array
+              items:
+                type: object
+                properties:
+                  range: { type: string, examples: ["80-100"] }
+                  label: { type: string, examples: ["Elite tier"] }
+        win_prediction:
+          type: object
+          properties:
+            description: { type: string }
+            max_raw_score: { type: integer, examples: [253] }
+            signals:
+              type: array
+              items:
+                type: object
+                properties:
+                  type: { type: string }
+                  weight: { type: integer }
+                  pct_of_total: { type: number, format: float }
+        multi_bet:
+          type: object
+          properties:
+            description: { type: string }
+            risk_profiles:
+              type: object
+              additionalProperties: { type: string }
+        data_sources:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              url: { type: string }
+              refresh: { type: string }
+        ai_review:
+          type: object
+          properties:
+            description: { type: string }
+            model: { type: string }
+        responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }

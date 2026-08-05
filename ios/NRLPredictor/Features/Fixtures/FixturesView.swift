@@ -174,11 +174,15 @@ struct FixturesView: View {
     // MARK: - Loading
 
     private func reload(force: Bool) async {
-        await rounds.load(force: force) {
+        // Concurrent: the round list is only needed by the picker, so making the
+        // fixtures wait behind it just delays the first paint.
+        async let roundsTask: Void = rounds.load(force: force) {
             try await APIClient.shared.get("/api/v1/rounds")
         }
-        await reloadMatches(force: force)
-        await reloadLeaderboard(force: force)
+        async let matchesTask: Void = reloadMatches(force: force)
+        async let leaderboardTask: Void = reloadLeaderboard(force: force)
+
+        _ = await (roundsTask, matchesTask, leaderboardTask)
     }
 
     private func reloadMatches(force: Bool) async {

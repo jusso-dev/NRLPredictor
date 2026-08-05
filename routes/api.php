@@ -8,8 +8,14 @@ use App\Http\Controllers\Api\V1\PlayerController;
 use App\Http\Controllers\Api\V1\PredictionController;
 use App\Http\Controllers\Api\V1\RoundController;
 use App\Http\Controllers\Api\V1\TeamController;
+use App\Http\Controllers\Api\OpenApiController;
 use App\Http\Controllers\ChatController;
 use Illuminate\Support\Facades\Route;
+
+// --- Machine-readable docs (no API key required; see ApiKeyAuth::isSpecPath) ---
+Route::get('/openapi.yaml', [OpenApiController::class, 'yaml']);
+Route::get('/openapi.json', [OpenApiController::class, 'json']);
+Route::get('/docs', [OpenApiController::class, 'docs']);
 
 // --- Chat (Codex CLI, in-process) ---
 Route::post('/chat', [ChatController::class, 'send']);

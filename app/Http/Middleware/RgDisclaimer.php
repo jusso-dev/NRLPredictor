@@ -24,6 +24,11 @@ class RgDisclaimer
     {
         $response = $next($request);
 
+        // The OpenAPI document must stay a valid spec, not a spec plus a disclaimer.
+        if (ApiKeyAuth::isSpecPath($request)) {
+            return $response;
+        }
+
         // For JSON responses (API), add disclaimer field
         if ($request->expectsJson() || $request->is('api/*')) {
             if ($response->headers->get('Content-Type') === 'application/json') {

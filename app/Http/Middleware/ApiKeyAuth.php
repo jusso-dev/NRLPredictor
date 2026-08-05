@@ -22,7 +22,7 @@ class ApiKeyAuth
     {
         $keys = self::configuredKeys();
 
-        if ($keys === []) {
+        if ($keys === [] || self::isSpecPath($request)) {
             return $next($request);
         }
 
@@ -35,6 +35,15 @@ class ApiKeyAuth
         }
 
         return $next($request);
+    }
+
+    /**
+     * The OpenAPI document and its docs page stay reachable without a key so
+     * tooling can discover the API; everything they describe still needs one.
+     */
+    public static function isSpecPath(Request $request): bool
+    {
+        return $request->is('api/openapi.yaml', 'api/openapi.json', 'api/docs');
     }
 
     /**
