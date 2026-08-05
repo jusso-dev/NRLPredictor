@@ -8,6 +8,7 @@ use App\Models\OddsSnapshot;
 use App\Models\Player;
 use App\Models\Round;
 use App\Models\Team;
+use App\Services\LateChangeRecorder;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -52,6 +53,12 @@ class FetchOdds implements ShouldBeUnique, ShouldQueue
 
     protected const REGION = 'au';
 
+    /** Set in handle(); never part of the serialized payload. */
+    protected ?LateChangeRecorder $lateChanges = null;
+
+    /** @var list<int> matches whose price moved far enough to be treated as news */
+    protected array $driftedMatchIds = [];
+
     public function __construct(
         public bool $includePlayerProps = true,
     ) {}
@@ -61,8 +68,11 @@ class FetchOdds implements ShouldBeUnique, ShouldQueue
         return 'fetch:odds';
     }
 
-    public function handle(): void
+    public function handle(LateChangeRecorder $lateChanges): void
     {
+        $this->lateChanges = $lateChanges;
+        $this->driftedMatchIds = [];
+
         $apiKey = config('services.odds_api.key');
         if (! $apiKey) {
             Log::warning('FetchOdds: ODDS_API_KEY not configured, skipping.');
@@ -90,6 +100,13 @@ class FetchOdds implements ShouldBeUnique, ShouldQueue
             // Step 3: Fetch player try scorer odds per event
             if ($this->includePlayerProps) {
                 $records += $this->fetchPlayerOdds($apiKey);
+            }
+
+            // A price that moved hard in the last hours implies news the scrapers
+            // have not read yet — the market is usually first. Re-score those.
+            foreach (array_unique($this->driftedMatchIds) as $matchId) {
+                RunPredictionAnalysis::dispatch($matchId);
+                Log::info("FetchOdds: market drift on match {$matchId}, re-scoring");
             }
 
             $this->completeLog($records);
@@ -235,20 +252,38 @@ class FetchOdds implements ShouldBeUnique, ShouldQueue
             // per market+bookmaker collide on the unique key and we lose one side's price.
             $outcomeName = $this->normaliseOutcomeName($outcome['name'] ?? null, $match, $marketName);
 
-            OddsSnapshot::updateOrCreate(
-                [
-                    'match_id' => $match->id,
-                    'player_id' => null,
-                    'market' => $marketName,
-                    'outcome' => $outcomeName,
-                    'bookmaker' => $bookmakerKey,
-                ],
-                [
-                    'decimal_odds' => $price,
-                    'point' => $outcome['point'] ?? null,
-                    'captured_at' => $now,
-                ],
-            );
+            $key = [
+                'match_id' => $match->id,
+                'player_id' => null,
+                'market' => $marketName,
+                'outcome' => $outcomeName,
+                'bookmaker' => $bookmakerKey,
+            ];
+
+            // Snapshots are upserted in place, so the old price only exists
+            // until the next line runs — read it first or the drift is lost.
+            $previous = OddsSnapshot::where($key)->value('decimal_odds');
+
+            OddsSnapshot::updateOrCreate($key, [
+                'decimal_odds' => $price,
+                'point' => $outcome['point'] ?? null,
+                'captured_at' => $now,
+            ]);
+
+            if ($previous !== null && $marketName === 'match_winner') {
+                $drift = $this->lateChanges->recordOddsDrift(
+                    $match,
+                    $marketName.($outcomeName ? " ({$outcomeName})" : ''),
+                    (float) $previous,
+                    (float) $price,
+                    $bookmakerKey,
+                );
+
+                if ($drift) {
+                    $this->driftedMatchIds[] = $match->id;
+                }
+            }
+
             $count++;
         }
 
@@ -347,19 +382,37 @@ class FetchOdds implements ShouldBeUnique, ShouldQueue
                             continue;
                         }
 
-                        OddsSnapshot::updateOrCreate(
-                            [
-                                'match_id' => $match->id,
-                                'player_id' => $player->id,
-                                'market' => 'ats',
-                                'bookmaker' => $bookmaker['key'],
-                            ],
-                            [
-                                'decimal_odds' => $price,
-                                'point' => null,
-                                'captured_at' => $now,
-                            ],
-                        );
+                        $key = [
+                            'match_id' => $match->id,
+                            'player_id' => $player->id,
+                            'market' => 'ats',
+                            'bookmaker' => $bookmaker['key'],
+                        ];
+
+                        $previous = OddsSnapshot::where($key)->value('decimal_odds');
+
+                        OddsSnapshot::updateOrCreate($key, [
+                            'decimal_odds' => $price,
+                            'point' => null,
+                            'captured_at' => $now,
+                        ]);
+
+                        if ($previous !== null) {
+                            $drift = $this->lateChanges->recordOddsDrift(
+                                $match,
+                                'ats',
+                                (float) $previous,
+                                (float) $price,
+                                $bookmaker['key'],
+                                $player->id,
+                                $player->name,
+                            );
+
+                            if ($drift) {
+                                $this->driftedMatchIds[] = $match->id;
+                            }
+                        }
+
                         $records++;
                     }
                 }

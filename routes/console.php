@@ -38,21 +38,61 @@ Schedule::job(new FetchLiveScores)->everyTwoMinutes()
     ->withoutOverlapping(2);
 Schedule::job(new FetchMatchResults)->everyThirtyMinutes()->withoutOverlapping(25);
 
-// Pre-game monitoring: refresh team lists, injuries, and news 45 min before kickoff
-// Runs every 15 min but only does work when a match is imminent
-Schedule::job(new FetchPreGameNews)->everyFifteenMinutes()
+// Pre-game monitoring: news in the last 90 minutes before kickoff. nrl.com
+// publishes late mail at the 24-hour and 90-minute marks, so a 45-minute window
+// missed the second drop entirely.
+Schedule::job(new FetchPreGameNews)->everyTenMinutes()
     ->when(fn () => Matchup::where('status', 'upcoming')
         ->whereNotNull('kickoff_at')
         ->where('kickoff_at', '>', now())
-        ->where('kickoff_at', '<=', now()->addMinutes(45))
+        ->where('kickoff_at', '<=', now()->addMinutes(90))
         ->exists())
-    ->withoutOverlapping(10);
+    ->withoutOverlapping(9);
 
 // Weather forecasts for upcoming matches
 Schedule::job(new FetchWeatherForecasts)->everyTwoHours()->withoutOverlapping(25);
 
 // Betting odds from The Odds API — every 4 hours to conserve API credits
 Schedule::job(new FetchOdds)->everyFourHours()->withoutOverlapping(25);
+
+// --- Pre-game ramp ------------------------------------------------------
+//
+// Late mail is the most valuable and most perishable input the models get:
+// bookmaker_try_odds (25) and bookmaker_line (25) are the heaviest signals in
+// either model, and a 4-hourly refresh means scoring a scratching with prices
+// from before it happened. These tiers tighten the loop as kickoff approaches.
+// Both jobs are ShouldBeUnique, so a tier firing while the base schedule is
+// still running is a no-op rather than a double fetch.
+
+$kickoffWithin = fn (int $minutes) => fn () => Matchup::where('status', 'upcoming')
+    ->whereNotNull('kickoff_at')
+    ->where('kickoff_at', '>', now())
+    ->where('kickoff_at', '<=', now()->addMinutes($minutes))
+    ->exists();
+
+// Team lists carry the actual late mail (nrl.com updates at the 24h and 90min
+// marks). FetchTeamLists diffs against what we stored and re-scores on change.
+Schedule::job(new FetchTeamLists)->everyTenMinutes()
+    ->when($kickoffWithin(150))
+    ->withoutOverlapping(9);
+
+// Match-level markets only (3 credits) from three hours out: enough to catch a
+// line move without paying for player props on every poll.
+Schedule::job(new FetchOdds(includePlayerProps: false))->everyThirtyMinutes()
+    ->when($kickoffWithin(180))
+    ->withoutOverlapping(25);
+
+// Inside the last hour, take the full board including try scorer prices —
+// this is when scratchings land and the ATS market reprices.
+Schedule::job(new FetchOdds)->everyFifteenMinutes()
+    ->when($kickoffWithin(60))
+    ->withoutOverlapping(14);
+
+// Rain in the hour before kickoff changes how a game is played; a two-hourly
+// forecast can be stale by exactly the amount that matters.
+Schedule::job(new FetchWeatherForecasts)->everyThirtyMinutes()
+    ->when($kickoffWithin(120))
+    ->withoutOverlapping(25);
 
 // Compute match metadata (turnaround, travel, tactical shifts) before scoring
 Schedule::job(new ComputeMatchMetadata)->everyThirtyMinutes()->withoutOverlapping(5);

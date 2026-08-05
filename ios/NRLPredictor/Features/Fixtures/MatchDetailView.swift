@@ -14,6 +14,7 @@ struct MatchDetailView: View {
                 AsyncContent(loadable: match, retry: { Task { await reload(force: true) } }) { payload in
                     if let match = payload.data {
                         header(match)
+                        lateChanges(match)
                         winPrediction(match)
                         bookmakerOdds(match)
                     } else {
@@ -62,6 +63,52 @@ struct MatchDetailView: View {
                 Text("\(match.homeScore ?? 0) — \(match.awayScore ?? 0)")
                     .font(.numeric(24, .medium))
                     .foregroundStyle(Palette.accentBright)
+            }
+        }
+    }
+
+    // MARK: - Late mail
+
+    @ViewBuilder
+    private func lateChanges(_ match: Match) -> some View {
+        let changes = match.lateChanges ?? []
+        if !changes.isEmpty {
+            SectionBlock(title: "Late mail", trailing: "\(changes.count) change\(changes.count == 1 ? "" : "s")") {
+                Card(tint: Palette.orange) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(changes) { change in
+                            HStack(alignment: .top, spacing: 10) {
+                                Chip(change.label, tone: change.tone)
+                                    .frame(width: 78, alignment: .leading)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(change.summary)
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(Palette.body)
+                                    Text([change.timing, change.isOdds ? change.source?.capitalized : nil]
+                                        .compactMap { $0 }
+                                        .joined(separator: " · "))
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(Palette.faint)
+                                }
+
+                                Spacer(minLength: 0)
+
+                                if let playerId = change.playerId {
+                                    NavigationLink(value: Route.player(playerId)) {
+                                        Image(systemName: "chevron.forward")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(Palette.muted)
+                                    }
+                                }
+                            }
+                        }
+
+                        Text("Detected by diffing the team list each poll and watching for hard price moves. Scores re-run as soon as a change lands.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.muted)
+                    }
+                }
             }
         }
     }

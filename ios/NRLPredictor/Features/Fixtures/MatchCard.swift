@@ -33,6 +33,9 @@ struct MatchCard: View {
     private var header: some View {
         HStack {
             Chip(match.statusBadge, tone: match.statusTone)
+            if let count = match.lateChangeCount, count > 0 {
+                Chip("Late mail \(count)", tone: .orange)
+            }
             Spacer()
             Text(Fmt.kickoffShort(match.kickoffAt).map { "\($0) AEST" } ?? (match.kickoffAest ?? "TBC"))
                 .font(.numeric(11))

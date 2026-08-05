@@ -16,11 +16,12 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Monitor NRL news in the 45 minutes before kickoff for late team changes,
+ * Monitor NRL news in the 90 minutes before kickoff for late team changes,
  * injuries, and other updates that could affect predictions.
  *
- * Scheduled to run every 5 minutes, but only does work when there's a match
- * kicking off within the next 45 minutes.
+ * Scheduled every 10 minutes, but only does work when a match kicks off within
+ * the next 90 minutes — nrl.com drops late mail at the 24-hour and 90-minute
+ * marks, and the second of those is the one that moves a team list.
  */
 class FetchPreGameNews implements ShouldBeUnique, ShouldQueue
 {
@@ -49,13 +50,13 @@ class FetchPreGameNews implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        // Find matches kicking off in the next 45 minutes
+        // Find matches kicking off in the next 90 minutes
         $upcoming = Matchup::with(['homeTeam', 'awayTeam'])
             ->where('round_id', $round->id)
             ->where('status', 'upcoming')
             ->whereNotNull('kickoff_at')
             ->where('kickoff_at', '>', now())
-            ->where('kickoff_at', '<=', now()->addMinutes(45))
+            ->where('kickoff_at', '<=', now()->addMinutes(90))
             ->get();
 
         if ($upcoming->isEmpty()) {

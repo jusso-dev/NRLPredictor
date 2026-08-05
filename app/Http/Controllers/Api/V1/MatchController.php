@@ -15,7 +15,7 @@ class MatchController extends Controller
         $roundNumber = $request->query('round');
         $season = $request->query('season', now()->year);
 
-        $query = Matchup::with(['homeTeam', 'awayTeam', 'round']);
+        $query = Matchup::with(['homeTeam', 'awayTeam', 'round'])->withCount('lateChanges');
 
         if ($roundNumber) {
             $round = Round::where('season', $season)->where('round_number', $roundNumber)->first();
@@ -37,7 +37,7 @@ class MatchController extends Controller
             return response()->json(['data' => []]);
         }
 
-        $matches = Matchup::with(['homeTeam', 'awayTeam', 'round'])
+        $matches = Matchup::with(['homeTeam', 'awayTeam', 'round'])->withCount('lateChanges')
             ->where('round_id', $round->id)
             ->orderBy('kickoff_at')
             ->get()
@@ -52,7 +52,7 @@ class MatchController extends Controller
 
     public function show(Matchup $match): JsonResponse
     {
-        $match->load(['homeTeam', 'awayTeam', 'round', 'teamLists.player.team', 'oddsSnapshots']);
+        $match->load(['homeTeam', 'awayTeam', 'round', 'teamLists.player.team', 'oddsSnapshots', 'lateChanges']);
         return response()->json(['data' => $this->formatMatch($match, detailed: true)]);
     }
 
@@ -83,9 +83,26 @@ class MatchController extends Controller
                 'away_win_pct' => $match->away_win_pct,
                 'predicted_winner_id' => $match->predicted_winner_id,
             ],
+            // Cheap counter so a list view can badge a match without loading
+            // every change; the rows themselves come back on the detail view.
+            'late_change_count' => $match->late_changes_count
+                ?? ($match->relationLoaded('lateChanges')
+                    ? $match->lateChanges->count()
+                    : $match->lateChanges()->count()),
         ];
 
         if ($detailed) {
+            $data['late_changes'] = $match->lateChanges->map(fn ($change) => array_filter([
+                'type' => $change->type,
+                'summary' => $change->summary,
+                'player_id' => $change->player_id,
+                'team_id' => $change->team_id,
+                'source' => $change->source,
+                'minutes_to_kickoff' => $change->minutes_to_kickoff,
+                'detected_at' => $change->detected_at?->toIso8601String(),
+                'detail' => $change->detail,
+            ], fn ($value) => $value !== null))->values();
+
             $data['win_signals'] = $match->win_signals;
 
             // Include bookmaker odds summary if available

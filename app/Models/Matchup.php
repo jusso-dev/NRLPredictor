@@ -58,6 +58,11 @@ class Matchup extends Model
         return $this->hasMany(Prediction::class, 'match_id');
     }
 
+    public function lateChanges(): HasMany
+    {
+        return $this->hasMany(MatchLateChange::class, 'match_id')->latest('detected_at');
+    }
+
     public function oddsSnapshots(): HasMany
     {
         return $this->hasMany(OddsSnapshot::class, 'match_id');

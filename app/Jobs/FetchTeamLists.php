@@ -6,6 +6,7 @@ use App\Jobs\Concerns\LogsDataFetch;
 use App\Models\MatchTeamList;
 use App\Models\Matchup;
 use App\Models\Player;
+use App\Services\LateChangeRecorder;
 use App\Support\HttpScraper;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -37,7 +38,7 @@ class FetchTeamLists implements ShouldQueue, ShouldBeUnique
         return 'fetch:team-lists';
     }
 
-    public function handle(HttpScraper $http): void
+    public function handle(HttpScraper $http, LateChangeRecorder $lateChanges): void
     {
         $this->startLog('nrl.com/match/data');
         $records = 0;
@@ -62,9 +63,33 @@ class FetchTeamLists implements ShouldQueue, ShouldBeUnique
                     $match->awayTeam->nrl_slug,
                 );
 
+                // Snapshot before writing: the sync is destructive (late outs are
+                // deleted), so this is the only chance to see what changed.
+                $before = [
+                    $match->home_team_id => $this->snapshotSide($match, $match->home_team_id),
+                    $match->away_team_id => $this->snapshotSide($match, $match->away_team_id),
+                ];
+
                 $data = $http->json($url, ['homeTeam', 'awayTeam']);
                 $records += $this->syncSide($match, $match->home_team_id, data_get($data, 'homeTeam.players', []));
                 $records += $this->syncSide($match, $match->away_team_id, data_get($data, 'awayTeam.players', []));
+
+                $changed = 0;
+                foreach ([$match->home_team_id, $match->away_team_id] as $teamId) {
+                    $changed += $lateChanges->recordTeamListDiff(
+                        $match,
+                        $teamId,
+                        $before[$teamId],
+                        $this->snapshotSide($match, $teamId),
+                    );
+                }
+
+                // Re-score immediately rather than waiting for the next 30-minute
+                // tick — a late out is worthless news after kickoff.
+                if ($changed > 0) {
+                    RunPredictionAnalysis::dispatch($match->id);
+                    Log::info("FetchTeamLists: {$changed} late change(s) on match {$match->id}, re-scoring");
+                }
             }
 
             Log::info("FetchTeamLists: {$records} player rows upserted across " . ($matches->count() - $skipped) . ' matches');
@@ -73,6 +98,27 @@ class FetchTeamLists implements ShouldQueue, ShouldBeUnique
             $this->failLog($e);
             throw $e;
         }
+    }
+
+    /**
+     * Current stored list for one side, keyed by player id.
+     *
+     * @return array<int, array{name: string, number: int, role: string}>
+     */
+    protected function snapshotSide(Matchup $match, int $teamId): array
+    {
+        return MatchTeamList::with('player:id,name')
+            ->where('match_id', $match->id)
+            ->where('team_id', $teamId)
+            ->get()
+            ->mapWithKeys(fn (MatchTeamList $row) => [
+                $row->player_id => [
+                    'name' => $row->player?->name ?? "player {$row->player_id}",
+                    'number' => (int) $row->position_number,
+                    'role' => (string) $row->role,
+                ],
+            ])
+            ->all();
     }
 
     /** @param array<int, array<string, mixed>> $players */

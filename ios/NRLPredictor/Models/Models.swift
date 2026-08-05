@@ -183,6 +183,49 @@ struct TeamLists: Decodable, Hashable, Sendable {
     let away: [TeamListEntry]
 }
 
+/// Something that changed close to kickoff: a late out, a reshuffle, or a
+/// bookmaker price that moved hard enough to imply unpublished news.
+struct LateChange: Decodable, Hashable, Sendable, Identifiable {
+    var id: String { "\(type)-\(summary)" }
+    let type: String
+    let summary: String
+    let playerId: Int?
+    let teamId: Int?
+    let source: String?
+    let minutesToKickoff: Int?
+    let detectedAt: String?
+
+    var isOdds: Bool { type == "odds_drift" }
+
+    var label: String {
+        switch type {
+        case "out": "Out"
+        case "in": "In"
+        case "positional": "Reshuffle"
+        case "odds_drift": "Market"
+        default: type.capitalized
+        }
+    }
+
+    var tone: ChipTone {
+        switch type {
+        case "out": .red
+        case "in": .green
+        case "positional": .orange
+        default: .blue
+        }
+    }
+
+    /// "62 min before kickoff" / "at kickoff" — more useful than a timestamp.
+    var timing: String? {
+        guard let minutesToKickoff else { return nil }
+        if minutesToKickoff <= 0 { return "after kickoff" }
+        if minutesToKickoff < 60 { return "\(minutesToKickoff) min before kickoff" }
+        let hours = Double(minutesToKickoff) / 60
+        return String(format: "%.1fh before kickoff", hours)
+    }
+}
+
 /// One struct for both the summary and detail payloads — the detail-only keys are optional.
 struct Match: Decodable, Identifiable, Hashable, Sendable {
     let id: Int
@@ -200,6 +243,8 @@ struct Match: Decodable, Identifiable, Hashable, Sendable {
     let winSignals: [Signal]?
     let bookmakerOdds: MatchBookmakerOdds?
     let teamLists: TeamLists?
+    let lateChangeCount: Int?
+    let lateChanges: [LateChange]?
 
     /// `Matchup::statusBadge()`
     var statusBadge: String {

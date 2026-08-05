@@ -662,12 +662,50 @@ components:
           description: Zero rather than null for fixtures that have not kicked off.
         away_score: { type: [integer, "null"] }
         win_prediction: { $ref: "#/components/schemas/WinPrediction" }
+        late_change_count:
+          type: integer
+          description: How many late changes have been detected for this match. Badge a fixture with this without loading the rows.
+          examples: [2]
+
+    LateChange:
+      type: object
+      description: |
+        Something that changed close to kickoff. Team movement comes from diffing the
+        nrl.com team list on each poll; `odds_drift` is a bookmaker price that moved far
+        enough inside the last 8 hours to imply news that has not been published yet.
+      required: [type, summary]
+      properties:
+        type:
+          type: string
+          enum: [out, in, positional, odds_drift]
+        summary:
+          type: string
+          examples: ["Selwyn Cobbo (2) out of the side"]
+        player_id: { type: integer }
+        team_id: { type: integer }
+        source:
+          type: string
+          description: nrl.com for team movement, otherwise the bookmaker whose price moved.
+          examples: ["nrl.com", "sportsbet"]
+        minutes_to_kickoff:
+          type: integer
+          description: Minutes remaining when the change was detected. Negative after kickoff.
+          examples: [62]
+        detected_at: { type: string, format: date-time }
+        detail:
+          type: object
+          description: Type-specific payload — the previous/current team-list entry, or the price move.
+          additionalProperties: true
 
     MatchDetail:
       allOf:
         - $ref: "#/components/schemas/MatchSummary"
         - type: object
           properties:
+            late_changes:
+              type: array
+              description: Newest first.
+              items: { $ref: "#/components/schemas/LateChange" }
             win_signals:
               type: [array, "null"]
               description: Home and away signals in one flat array; split on `side`.
