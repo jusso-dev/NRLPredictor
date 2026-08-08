@@ -47,8 +47,15 @@ class FetchMatchResults implements ShouldBeUnique, ShouldQueue
 
     public function handle(HttpScraper $http, NrlDrawPage $drawPage): void
     {
-        $round = Round::current();
-        if (! $round) {
+        // Revisit recent completed rounds, not only Round::current(). Once a
+        // round finishes, Round::current() advances immediately; any missed
+        // try events otherwise remain missing forever and tuning cannot run.
+        $rounds = Round::where('season', now()->year)
+            ->whereHas('matches', fn ($q) => $q->where('status', 'completed'))
+            ->orderByDesc('round_number')
+            ->limit(3)
+            ->get();
+        if ($rounds->isEmpty()) {
             return;
         }
 
@@ -56,18 +63,20 @@ class FetchMatchResults implements ShouldBeUnique, ShouldQueue
         $records = 0;
 
         try {
-            $fixtures = $drawPage->fixtures($http, $round->season, $round->round_number);
-            $completed = collect($fixtures)->filter(
-                fn ($f) => \App\Support\NrlMatchState::toStatus($f['matchState'] ?? null) === 'completed',
-            );
+            foreach ($rounds as $round) {
+                $fixtures = $drawPage->fixtures($http, $round->season, $round->round_number);
+                $completed = collect($fixtures)->filter(
+                    fn ($f) => \App\Support\NrlMatchState::toStatus($f['matchState'] ?? null) === 'completed',
+                );
 
-            foreach ($completed as $fixture) {
-                $matchCentreUrl = $fixture['matchCentreUrl'] ?? null;
-                if (! $matchCentreUrl) {
-                    continue;
+                foreach ($completed as $fixture) {
+                    $matchCentreUrl = $fixture['matchCentreUrl'] ?? null;
+                    if (! $matchCentreUrl) {
+                        continue;
+                    }
+
+                    $records += $this->processMatch($http, $matchCentreUrl, $fixture, $round);
                 }
-
-                $records += $this->processMatch($http, $matchCentreUrl, $fixture);
             }
 
             $this->completeLog($records);
@@ -77,12 +86,12 @@ class FetchMatchResults implements ShouldBeUnique, ShouldQueue
         }
     }
 
-    protected function processMatch(HttpScraper $http, string $matchCentreUrl, array $fixture): int
+    protected function processMatch(HttpScraper $http, string $matchCentreUrl, array $fixture, ?Round $round = null): int
     {
         // Resolve the match in our database
         $homeNickname = data_get($fixture, 'homeTeam.nickName');
         $awayNickname = data_get($fixture, 'awayTeam.nickName');
-        $match = $this->findMatch($homeNickname, $awayNickname);
+        $match = $this->findMatch($homeNickname, $awayNickname, $round?->id);
         if (! $match) {
             return 0;
         }
@@ -259,7 +268,7 @@ class FetchMatchResults implements ShouldBeUnique, ShouldQueue
         );
     }
 
-    protected function findMatch(?string $homeNickname, ?string $awayNickname): ?Matchup
+    protected function findMatch(?string $homeNickname, ?string $awayNickname, ?int $roundId = null): ?Matchup
     {
         if (! $homeNickname || ! $awayNickname) {
             return null;
@@ -270,6 +279,7 @@ class FetchMatchResults implements ShouldBeUnique, ShouldQueue
 
         return Matchup::whereHas('homeTeam', fn ($q) => $q->where('nrl_slug', $homeSlug))
             ->whereHas('awayTeam', fn ($q) => $q->where('nrl_slug', $awaySlug))
+            ->when($roundId, fn ($q) => $q->where('round_id', $roundId))
             ->where('status', 'completed')
             ->first();
     }

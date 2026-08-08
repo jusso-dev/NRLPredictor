@@ -8,6 +8,7 @@ use App\Models\Player;
 use App\Models\Prediction;
 use App\Models\Round;
 use App\Models\Team;
+use App\Models\WeightAdjustment;
 use Illuminate\Support\Str;
 
 /**
@@ -107,6 +108,52 @@ class AgentContext
                     'published_at' => optional($a->published_at)->toIso8601String(),
                     'excerpt' => Str::limit($a->content ?? '', 1500, '...'),
                 ])->all(),
+        ];
+    }
+
+    /**
+     * Prior-round feedback only. Strict round bounds prevent future results
+     * leaking into an upcoming match's AI review.
+     */
+    public function learningContext(Matchup $match): array
+    {
+        $match->loadMissing('round');
+        if (! $match->round) {
+            return [];
+        }
+
+        $adjustment = WeightAdjustment::where('season', $match->round->season)
+            ->where('after_round', '<', $match->round->round_number)
+            ->orderByDesc('after_round')
+            ->first();
+
+        if (! $adjustment) {
+            return [];
+        }
+
+        $deltas = $adjustment->signal_deltas ?? [];
+        arsort($deltas);
+        $positive = collect($deltas)
+            ->filter(fn ($delta) => $delta > 0)
+            ->take(5)
+            ->map(fn ($delta, $type) => ['signal' => $type, 'delta' => round($delta, 4)])
+            ->values()
+            ->all();
+        $negative = collect(array_reverse($deltas, true))
+            ->filter(fn ($delta) => $delta < 0)
+            ->take(5)
+            ->map(fn ($delta, $type) => ['signal' => $type, 'delta' => round($delta, 4)])
+            ->values()
+            ->all();
+
+        return [
+            'trained_through_round' => $adjustment->after_round,
+            'validation_top5_before' => $adjustment->accuracy_before,
+            'validation_top5_after' => $adjustment->accuracy_after,
+            'brier_score' => $adjustment->brier_score,
+            'market_brier' => $adjustment->market_brier,
+            'signals_to_trust' => $positive,
+            'signals_to_discount' => $negative,
         ];
     }
 

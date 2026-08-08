@@ -69,7 +69,7 @@ class BackfillMatchStatsCommand extends Command
 
                 $homeNick = data_get($fixture, 'homeTeam.nickName');
                 $awayNick = data_get($fixture, 'awayTeam.nickName');
-                $match = $findMatch->invoke($fetcher, $homeNick, $awayNick);
+                $match = $findMatch->invoke($fetcher, $homeNick, $awayNick, $round->id);
                 if (! $match) {
                     continue;
                 }

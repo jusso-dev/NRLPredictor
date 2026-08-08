@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Models\SignalPerformanceLog;
 use App\Models\WeightAdjustment;
+use App\Services\SignalCalculator;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -32,7 +33,7 @@ class Learning extends Component
             ])->values());
 
         // Current weights
-        $currentWeights = config('nrl-weights.try_scorer', \App\Services\SignalCalculator::WEIGHTS);
+        $currentWeights = app(SignalCalculator::class)->weights();
 
         return view('livewire.learning', [
             'adjustments' => $adjustments,

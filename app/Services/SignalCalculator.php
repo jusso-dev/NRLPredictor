@@ -382,7 +382,13 @@ class SignalCalculator
         // Phase 20: rolling-boil attacking streak (consecutive 3+ try matches)
         $signals[] = $this->teamAttackingStreak($player, $w);
 
-        return array_values(array_filter($signals));
+        return array_values(array_map(function (array $signal) {
+            // Public prediction payloads have always exposed integer weights.
+            // PredictionScorer uses continuous tuned weights directly.
+            $signal['weight'] = (int) round($signal['weight']);
+
+            return $signal;
+        }, array_filter($signals)));
     }
 
     public function maxPossibleScore(): int

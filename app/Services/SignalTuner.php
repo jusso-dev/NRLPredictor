@@ -32,6 +32,9 @@ class SignalTuner
     // Minimum sample size before we trust a signal's delta
     protected const MIN_SAMPLE = 10;
 
+    // Completed rounds used to guard each candidate weight update.
+    protected const VALIDATION_ROUNDS = 8;
+
     public function __construct(
         protected CalibrationGrader $grader,
         protected ModelAlertChecker $alertChecker,
@@ -60,7 +63,13 @@ class SignalTuner
         // (which may already include prior tuned adjustments from the DB), not just
         // the baked-in config — otherwise each tune resets to the defaults.
         $currentWeights = (new SignalCalculator)->weights();
-        $newWeights = $this->adjustWeights($currentWeights, $cumulativeDeltas);
+        $candidateWeights = $this->adjustWeights($currentWeights, $cumulativeDeltas);
+
+        // Reject updates that make known historical ranking quality worse.
+        $validationBefore = $this->backtestWeights($season, $roundNumber, $currentWeights);
+        $validationAfter = $this->backtestWeights($season, $roundNumber, $candidateWeights);
+        $candidateAccepted = $this->candidatePassesValidation($validationBefore, $validationAfter);
+        $newWeights = $candidateAccepted ? $candidateWeights : $currentWeights;
 
         // Step 5: Compute accuracy metrics
         $accuracyBefore = $this->computeAccuracy($round);
@@ -70,7 +79,18 @@ class SignalTuner
         $calibration = $this->grader->gradeRound($season, $roundNumber);
 
         // Step 6: Persist (DB row is the source of truth; SignalCalculator reads this back)
-        $adjustment = $this->persistAdjustment($season, $roundNumber, $currentWeights, $newWeights, $cumulativeDeltas, $accuracyBefore, $calibration);
+        $adjustment = $this->persistAdjustment(
+            $season,
+            $roundNumber,
+            $currentWeights,
+            $newWeights,
+            $cumulativeDeltas,
+            $accuracyBefore,
+            $calibration,
+            $validationBefore,
+            $validationAfter,
+            $candidateAccepted,
+        );
 
         // Step 6b: Check rolling Brier-vs-market trend; raise/resolve an alert
         // if the model has been trailing the bookmaker for N consecutive rounds.
@@ -96,6 +116,11 @@ class SignalTuner
             'insights' => $insights,
             'adjustment_id' => $adjustment->id,
             'calibration' => $calibration,
+            'validation' => [
+                'before' => $validationBefore,
+                'after' => $validationAfter,
+                'accepted' => $candidateAccepted,
+            ],
         ];
     }
 
@@ -193,13 +218,23 @@ class SignalTuner
     }
 
     /**
-     * Adjust weights based on cumulative deltas.
-     * Positive delta = signal is predictive → increase weight.
-     * Negative delta = signal is misleading → decrease weight.
+     * Adjust relative signal share from cumulative deltas.
      */
     protected function adjustWeights(array $currentWeights, array $deltas): array
     {
         $newWeights = $currentWeights;
+
+        $weightedDelta = 0.0;
+        $weightTotal = 0.0;
+        foreach ($deltas as $type => $delta) {
+            if (! isset($currentWeights[$type])) {
+                continue;
+            }
+            $weight = (float) $currentWeights[$type];
+            $weightedDelta += $delta * $weight;
+            $weightTotal += $weight;
+        }
+        $meanDelta = $weightTotal > 0 ? $weightedDelta / $weightTotal : 0.0;
 
         foreach ($deltas as $type => $delta) {
             if (! isset($currentWeights[$type])) {
@@ -208,18 +243,129 @@ class SignalTuner
 
             $current = $currentWeights[$type];
 
-            // Scale adjustment by delta magnitude
-            // delta of +0.1 means signal was 10% stronger in hits than misses
-            $adjustmentPct = min(self::MAX_ADJUSTMENT_PCT, max(-self::MAX_ADJUSTMENT_PCT, $delta));
+            // Keep fractional changes. Integer rounding previously turned most
+            // updates into no-ops and pushed larger signals toward MAX_WEIGHT.
+            $relativeDelta = $delta - $meanDelta;
+            $adjustmentPct = min(self::MAX_ADJUSTMENT_PCT, max(-self::MAX_ADJUSTMENT_PCT, $relativeDelta));
             $newWeight = $current * (1 + $adjustmentPct);
-
-            // Clamp
-            $newWeight = max(self::MIN_WEIGHT, min(self::MAX_WEIGHT, round($newWeight)));
-
-            $newWeights[$type] = (int) $newWeight;
+            $newWeights[$type] = round(max(self::MIN_WEIGHT, min(self::MAX_WEIGHT, $newWeight)), 4);
         }
 
-        return $newWeights;
+        return $this->normaliseWeights($newWeights);
+    }
+
+    /**
+     * Anchor total weight to the checked-in baseline. Only relative signal
+     * share changes ranking, so global inflation is never useful.
+     */
+    protected function normaliseWeights(array $weights): array
+    {
+        $baseline = config('nrl-weights.try_scorer', SignalCalculator::WEIGHTS);
+        $targetTotal = collect($weights)
+            ->keys()
+            ->sum(fn ($type) => (float) ($baseline[$type] ?? $weights[$type]));
+        $currentTotal = array_sum($weights);
+
+        if ($targetTotal <= 0 || $currentTotal <= 0) {
+            return $weights;
+        }
+
+        $scale = $targetTotal / $currentTotal;
+        foreach ($weights as $type => $weight) {
+            $weights[$type] = round(
+                max(self::MIN_WEIGHT, min(self::MAX_WEIGHT, $weight * $scale)),
+                4,
+            );
+        }
+
+        return $weights;
+    }
+
+    /**
+     * Re-rank saved pre-match candidates with supplied weights. Stored signal
+     * strengths avoid leaking post-match data into validation.
+     */
+    protected function backtestWeights(int $season, int $currentRound, array $weights): array
+    {
+        $matches = Matchup::with(['predictions', 'tryEvents'])
+            ->whereHas('round', fn ($q) => $q
+                ->where('season', $season)
+                ->whereBetween('round_number', [max(1, $currentRound - self::VALIDATION_ROUNDS + 1), $currentRound]))
+            ->where('status', 'completed')
+            ->whereHas('predictions')
+            ->whereHas('tryEvents')
+            ->get();
+
+        $topFiveHits = 0;
+        $topFivePicks = 0;
+        $ndcgTotal = 0.0;
+        $gradedMatches = 0;
+
+        foreach ($matches as $match) {
+            $scorerIds = $match->tryEvents->pluck('player_id')->unique();
+            $ranked = $match->predictions
+                ->map(function (Prediction $prediction) use ($weights) {
+                    $score = 0.0;
+                    foreach ($prediction->signals ?? [] as $signal) {
+                        $type = $signal['type'] ?? null;
+                        if (! $type) {
+                            continue;
+                        }
+                        $weight = (float) ($weights[$type] ?? $signal['weight'] ?? 0);
+                        $score += $weight * (float) ($signal['strength'] ?? 0);
+                    }
+
+                    return ['player_id' => $prediction->player_id, 'score' => $score];
+                })
+                ->sortBy([
+                    ['score', 'desc'],
+                    ['player_id', 'asc'],
+                ])
+                ->values();
+
+            foreach ($ranked->take(5) as $prediction) {
+                $topFivePicks++;
+                if ($scorerIds->contains($prediction['player_id'])) {
+                    $topFiveHits++;
+                }
+            }
+
+            $relevant = $ranked->whereIn('player_id', $scorerIds)->count();
+            if ($relevant === 0) {
+                continue;
+            }
+
+            $dcg = 0.0;
+            foreach ($ranked as $index => $prediction) {
+                if ($scorerIds->contains($prediction['player_id'])) {
+                    $dcg += 1 / log($index + 2, 2);
+                }
+            }
+
+            $idealDcg = 0.0;
+            for ($index = 0; $index < $relevant; $index++) {
+                $idealDcg += 1 / log($index + 2, 2);
+            }
+
+            $ndcgTotal += $dcg / $idealDcg;
+            $gradedMatches++;
+        }
+
+        return [
+            'matches' => $matches->count(),
+            'top5_accuracy' => $topFivePicks > 0 ? round($topFiveHits / $topFivePicks * 100, 2) : 0.0,
+            'ndcg' => $gradedMatches > 0 ? round($ndcgTotal / $gradedMatches, 4) : 0.0,
+        ];
+    }
+
+    protected function candidatePassesValidation(array $before, array $after): bool
+    {
+        if (($before['matches'] ?? 0) === 0) {
+            return true;
+        }
+
+        return ($after['top5_accuracy'] ?? 0) + 0.0001 >= ($before['top5_accuracy'] ?? 0)
+            && ($after['ndcg'] ?? 0) + 0.0001 >= ($before['ndcg'] ?? 0);
     }
 
     protected function computeAccuracy(Round $round): float
@@ -245,8 +391,18 @@ class SignalTuner
         return $total > 0 ? round($hits / $total * 100, 1) : 0;
     }
 
-    protected function persistAdjustment(int $season, int $round, array $old, array $new, array $deltas, float $accuracy, array $calibration = []): WeightAdjustment
-    {
+    protected function persistAdjustment(
+        int $season,
+        int $round,
+        array $old,
+        array $new,
+        array $deltas,
+        float $accuracy,
+        array $calibration = [],
+        array $validationBefore = [],
+        array $validationAfter = [],
+        bool $candidateAccepted = true,
+    ): WeightAdjustment {
         $changed = [];
         foreach ($new as $type => $weight) {
             if (($old[$type] ?? 0) !== $weight) {
@@ -254,7 +410,14 @@ class SignalTuner
             }
         }
 
-        $reasoning = $this->buildReasoning($changed, $accuracy, $calibration);
+        $reasoning = $this->buildReasoning(
+            $changed,
+            $accuracy,
+            $calibration,
+            $validationBefore,
+            $validationAfter,
+            $candidateAccepted,
+        );
 
         return WeightAdjustment::create([
             'season' => $season,
@@ -262,7 +425,8 @@ class SignalTuner
             'old_weights' => $old,
             'new_weights' => $new,
             'signal_deltas' => $deltas,
-            'accuracy_before' => $accuracy,
+            'accuracy_before' => $validationBefore['top5_accuracy'] ?? $accuracy,
+            'accuracy_after' => $validationAfter['top5_accuracy'] ?? $accuracy,
             'brier_score' => $calibration['brier'] ?? null,
             'log_loss' => $calibration['log_loss'] ?? null,
             'value_score' => $calibration['value_score'] ?? null,
@@ -273,16 +437,37 @@ class SignalTuner
         ]);
     }
 
-    protected function buildReasoning(array $changed, float $accuracy, array $calibration = []): string
-    {
+    protected function buildReasoning(
+        array $changed,
+        float $accuracy,
+        array $calibration = [],
+        array $validationBefore = [],
+        array $validationAfter = [],
+        bool $candidateAccepted = true,
+    ): string {
         $lines = ["Round accuracy: {$accuracy}%"];
+
+        if (($validationBefore['matches'] ?? 0) > 0) {
+            $status = $candidateAccepted ? 'accepted' : 'rejected';
+            $lines[] = sprintf(
+                'Rolling validation (%d matches): top-5 %.2f%% → %.2f%%; NDCG %.4f → %.4f; candidate %s',
+                $validationBefore['matches'],
+                $validationBefore['top5_accuracy'],
+                $validationAfter['top5_accuracy'],
+                $validationBefore['ndcg'],
+                $validationAfter['ndcg'],
+                $status,
+            );
+        }
 
         if (! empty($calibration['summary'])) {
             $lines[] = $calibration['summary'];
         }
 
         if (empty($changed)) {
-            $lines[] = 'No weight changes — all signals performing within normal range.';
+            $lines[] = $candidateAccepted
+                ? 'No relative weight changes — signals performed within the current range.'
+                : 'No weight changes — candidate failed the rolling validation guardrail.';
 
             return implode("\n", $lines);
         }

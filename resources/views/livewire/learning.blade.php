@@ -66,7 +66,12 @@
                         <div class="h-display text-lg text-bone-50">After Round {{ $adj->after_round }}</div>
                         <div class="flex items-center gap-3">
                             @if ($adj->accuracy_before)
-                                <span class="chip chip-gold">{{ $adj->accuracy_before }}% accuracy</span>
+                                <span class="chip chip-gold">
+                                    validation {{ $adj->accuracy_before }}%
+                                    @if ($adj->accuracy_after !== null)
+                                        → {{ $adj->accuracy_after }}%
+                                    @endif
+                                </span>
                             @endif
                             <span class="text-xs text-bone-400">{{ $adj->created_at->format('D j M H:i') }}</span>
                         </div>

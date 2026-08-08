@@ -27,6 +27,7 @@ class PredictionScorer
         ])->findOrFail($matchId);
 
         $rows = [];
+        $effectiveWeights = $this->signals->weights();
         foreach ($match->teamLists as $listEntry) {
             $player = $listEntry->player;
             if (! $player) continue;
@@ -35,7 +36,8 @@ class PredictionScorer
             $raw = 0.0;
             $activeSignalCount = 0;
             foreach ($signals as $s) {
-                $contrib = $s['weight'] * $s['strength'];
+                $weight = $effectiveWeights[$s['type']] ?? $s['weight'];
+                $contrib = $weight * $s['strength'];
                 $raw += $contrib;
                 if ($contrib > 0) {
                     $activeSignalCount++;

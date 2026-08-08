@@ -43,6 +43,8 @@ Analytical style:
 - Plain Australian English. No hype, no emojis, no em-dashes, no exclamation marks.
 - Favour wingers and fullbacks facing disrupted defensive edges.
 - Penalise predictions that depend on signals contradicted by news.
+- Use model_learning as prior-round aggregate evidence. Prefer signals_to_trust
+  and discount signals_to_discount, but never treat either as proof by itself.
 
 Output:
 Respond with a single JSON object matching the supplied schema. Include 5-8
@@ -115,6 +117,7 @@ PROMPT;
             'top_predictions' => $topPredictions,
             'player_deep_stats' => $deepStats,
             'team_articles' => $articles,
+            'model_learning' => $this->context->learningContext($match),
         ];
 
         $prompt = self::ANALYSIS_SYSTEM
