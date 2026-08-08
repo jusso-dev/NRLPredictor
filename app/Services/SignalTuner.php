@@ -364,8 +364,8 @@ class SignalTuner
             return true;
         }
 
-        return ($after['top5_accuracy'] ?? 0) + 0.0001 >= ($before['top5_accuracy'] ?? 0)
-            && ($after['ndcg'] ?? 0) + 0.0001 >= ($before['ndcg'] ?? 0);
+        return ($after['top5_accuracy'] ?? 0) >= ($before['top5_accuracy'] ?? 0)
+            && ($after['ndcg'] ?? 0) >= ($before['ndcg'] ?? 0);
     }
 
     protected function computeAccuracy(Round $round): float

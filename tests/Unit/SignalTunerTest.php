@@ -48,6 +48,11 @@ class SignalTunerTest extends TestCase
             'top5_accuracy' => 51.0,
             'ndcg' => 0.71,
         ]));
+        $this->assertFalse($tuner->passesForTest($before, [
+            'matches' => 8,
+            'top5_accuracy' => 50.0,
+            'ndcg' => 0.7199,
+        ]));
     }
 
     private function tuner(): TestableSignalTuner
