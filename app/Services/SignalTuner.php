@@ -63,13 +63,20 @@ class SignalTuner
         // (which may already include prior tuned adjustments from the DB), not just
         // the baked-in config — otherwise each tune resets to the defaults.
         $currentWeights = (new SignalCalculator)->weights();
-        $candidateWeights = $this->adjustWeights($currentWeights, $cumulativeDeltas);
 
-        // Reject updates that make known historical ranking quality worse.
+        // Try progressively smaller learning steps. This keeps the model moving
+        // when a full update is too aggressive, without accepting regressions.
         $validationBefore = $this->backtestWeights($season, $roundNumber, $currentWeights);
-        $validationAfter = $this->backtestWeights($season, $roundNumber, $candidateWeights);
-        $candidateAccepted = $this->candidatePassesValidation($validationBefore, $validationAfter);
-        $newWeights = $candidateAccepted ? $candidateWeights : $currentWeights;
+        $candidate = $this->validatedCandidate(
+            $season,
+            $roundNumber,
+            $currentWeights,
+            $cumulativeDeltas,
+            $validationBefore,
+        );
+        $validationAfter = $candidate['validation'];
+        $candidateAccepted = $candidate['accepted'];
+        $newWeights = $candidate['weights'];
 
         // Step 5: Compute accuracy metrics
         $accuracyBefore = $this->computeAccuracy($round);
@@ -368,6 +375,46 @@ class SignalTuner
             && ($after['ndcg'] ?? 0) >= ($before['ndcg'] ?? 0);
     }
 
+    /**
+     * Use the largest learning step that is non-regressive on held-out rounds.
+     *
+     * @return array{weights: array<string, float>, validation: array<string, mixed>, accepted: bool}
+     */
+    protected function validatedCandidate(
+        int $season,
+        int $roundNumber,
+        array $currentWeights,
+        array $deltas,
+        array $validationBefore,
+    ): array {
+        $firstValidation = null;
+
+        foreach ([1.0, 0.5, 0.25, 0.1, 0.05, 0.01] as $scale) {
+            $scaledDeltas = collect($deltas)
+                ->map(fn ($delta) => (float) $delta * $scale)
+                ->all();
+            $weights = $this->adjustWeights($currentWeights, $scaledDeltas);
+            $validation = $this->backtestWeights($season, $roundNumber, $weights);
+            $firstValidation ??= $validation;
+
+            if ($this->candidatePassesValidation($validationBefore, $validation)) {
+                $validation['step_scale'] = $scale;
+
+                return [
+                    'weights' => $weights,
+                    'validation' => $validation,
+                    'accepted' => true,
+                ];
+            }
+        }
+
+        return [
+            'weights' => $currentWeights,
+            'validation' => $firstValidation ?? $validationBefore,
+            'accepted' => false,
+        ];
+    }
+
     protected function computeAccuracy(Round $round): float
     {
         $matches = Matchup::with(['predictions', 'tryEvents'])
@@ -448,16 +495,20 @@ class SignalTuner
         $lines = ["Round accuracy: {$accuracy}%"];
 
         if (($validationBefore['matches'] ?? 0) > 0) {
-            $status = $candidateAccepted ? 'accepted' : 'rejected';
-            $lines[] = sprintf(
-                'Rolling validation (%d matches): top-5 %.2f%% → %.2f%%; NDCG %.4f → %.4f; candidate %s',
-                $validationBefore['matches'],
-                $validationBefore['top5_accuracy'],
-                $validationAfter['top5_accuracy'],
-                $validationBefore['ndcg'],
-                $validationAfter['ndcg'],
-                $status,
-            );
+        $status = $candidateAccepted ? 'accepted' : 'rejected';
+        $step = isset($validationAfter['step_scale'])
+            ? sprintf(' at %.0f%% step', $validationAfter['step_scale'] * 100)
+            : '';
+        $lines[] = sprintf(
+            'Rolling validation (%d matches): top-5 %.2f%% → %.2f%%; NDCG %.4f → %.4f; candidate %s%s',
+            $validationBefore['matches'],
+            $validationBefore['top5_accuracy'],
+            $validationAfter['top5_accuracy'],
+            $validationBefore['ndcg'],
+            $validationAfter['ndcg'],
+            $status,
+            $step,
+        );
         }
 
         if (! empty($calibration['summary'])) {

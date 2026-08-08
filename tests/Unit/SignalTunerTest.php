@@ -55,6 +55,28 @@ class SignalTunerTest extends TestCase
         ]));
     }
 
+    public function test_it_steps_down_to_the_largest_safe_learning_rate(): void
+    {
+        config()->set('nrl-weights.try_scorer', [
+            'good_signal' => 20,
+            'bad_signal' => 10,
+        ]);
+        $tuner = new StepDownSignalTuner(
+            Mockery::mock(CalibrationGrader::class),
+            Mockery::mock(ModelAlertChecker::class),
+        );
+
+        $candidate = $tuner->selectForTest(
+            ['good_signal' => 20, 'bad_signal' => 10],
+            ['good_signal' => 0.2, 'bad_signal' => -0.2],
+            ['matches' => 8, 'top5_accuracy' => 50.0, 'ndcg' => 0.72],
+        );
+
+        $this->assertTrue($candidate['accepted']);
+        $this->assertSame(0.5, $candidate['validation']['step_scale']);
+        $this->assertNotSame(20.0, $candidate['weights']['good_signal']);
+    }
+
     private function tuner(): TestableSignalTuner
     {
         return new TestableSignalTuner(
@@ -74,5 +96,24 @@ class TestableSignalTuner extends SignalTuner
     public function passesForTest(array $before, array $after): bool
     {
         return $this->candidatePassesValidation($before, $after);
+    }
+}
+
+class StepDownSignalTuner extends TestableSignalTuner
+{
+    private int $backtests = 0;
+
+    public function selectForTest(array $weights, array $deltas, array $before): array
+    {
+        return $this->validatedCandidate(2026, 1, $weights, $deltas, $before);
+    }
+
+    protected function backtestWeights(int $season, int $roundNumber, array $weights): array
+    {
+        $this->backtests++;
+
+        return $this->backtests === 1
+            ? ['matches' => 8, 'top5_accuracy' => 50.0, 'ndcg' => 0.7199]
+            : ['matches' => 8, 'top5_accuracy' => 50.0, 'ndcg' => 0.72];
     }
 }
