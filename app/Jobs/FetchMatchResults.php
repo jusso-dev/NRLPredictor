@@ -70,6 +70,12 @@ class FetchMatchResults implements ShouldBeUnique, ShouldQueue
                 );
 
                 foreach ($completed as $fixture) {
+                    $sourceEventId = $fixture['sourceEventId'] ?? null;
+                    if ($sourceEventId) {
+                        $records += $this->processEspnMatch($http, $sourceEventId, $fixture, $round);
+                        continue;
+                    }
+
                     $matchCentreUrl = $fixture['matchCentreUrl'] ?? null;
                     if (! $matchCentreUrl) {
                         continue;
@@ -84,6 +90,96 @@ class FetchMatchResults implements ShouldBeUnique, ShouldQueue
             $this->failLog($e);
             throw $e;
         }
+    }
+
+    protected function processEspnMatch(HttpScraper $http, string $eventId, array $fixture, Round $round): int
+    {
+        $match = $this->findMatch(
+            data_get($fixture, 'homeTeam.nickName'),
+            data_get($fixture, 'awayTeam.nickName'),
+            $round->id,
+        );
+        if (! $match) {
+            return 0;
+        }
+        if (TryEvent::where('match_id', $match->id)->exists()) {
+            return 0;
+        }
+
+        $url = "https://site.api.espn.com/apis/site/v2/sports/rugby-league/3/summary?event={$eventId}";
+        $data = $http->json($url, ['boxscore.players']);
+        $match->loadMissing(['homeTeam', 'awayTeam']);
+        $records = 0;
+
+        foreach (data_get($data, 'boxscore.players', []) as $teamBoxscore) {
+            $teamSlug = $this->nicknameToSlug((string) data_get($teamBoxscore, 'team.displayName'));
+            $teamId = match ($teamSlug) {
+                $match->homeTeam?->nrl_slug => $match->home_team_id,
+                $match->awayTeam?->nrl_slug => $match->away_team_id,
+                default => null,
+            };
+            if (! $teamId) {
+                continue;
+            }
+
+            foreach (data_get($teamBoxscore, 'statistics.0.athletes', []) as $athlete) {
+                $tries = $this->espnStatValue($athlete, 'tries');
+                $name = trim((string) data_get($athlete, 'athlete.displayName'));
+                if ($tries < 1 || $name === '') {
+                    continue;
+                }
+
+                $player = $this->resolveEspnPlayer($match, $teamId, $name);
+                $existing = TryEvent::where('match_id', $match->id)
+                    ->where('player_id', $player->id)
+                    ->count();
+
+                $missing = max(0, $tries - $existing);
+                for ($index = 0; $index < $missing; $index++) {
+                    TryEvent::create([
+                        'match_id' => $match->id,
+                        'player_id' => $player->id,
+                        'minute' => null,
+                    ]);
+                    $records++;
+                }
+            }
+        }
+
+        return $records;
+    }
+
+    protected function espnStatValue(array $athlete, string $name): int
+    {
+        foreach (data_get($athlete, 'statistics', []) as $group) {
+            foreach (data_get($group, 'stats', []) as $stat) {
+                if (($stat['name'] ?? null) === $name) {
+                    return (int) ($stat['value'] ?? 0);
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    protected function resolveEspnPlayer(Matchup $match, int $teamId, string $name): Player
+    {
+        $slug = Str::slug($name);
+        $listedPlayer = Player::whereHas('matchTeamLists', fn ($query) => $query
+            ->where('match_id', $match->id)
+            ->where('team_id', $teamId))
+            ->where(fn ($query) => $query->where('nrl_slug', $slug)->orWhere('name', $name))
+            ->first();
+
+        return $listedPlayer
+            ?? Player::where('team_id', $teamId)
+                ->where(fn ($query) => $query->where('nrl_slug', $slug)->orWhere('name', $name))
+                ->first()
+            ?? Player::create([
+                'nrl_slug' => $slug,
+                'name' => $name,
+                'team_id' => $teamId,
+            ]);
     }
 
     protected function processMatch(HttpScraper $http, string $matchCentreUrl, array $fixture, ?Round $round = null): int

@@ -32,7 +32,7 @@ class HttpScraper
     {
         $this->throttle($url);
 
-        return $this->client()->get($url);
+        return $this->client($url)->get($url);
     }
 
     public function crawl(string $url): ?Crawler
@@ -85,10 +85,16 @@ class HttpScraper
         return $data;
     }
 
-    protected function client(): PendingRequest
+    protected function client(?string $url = null): PendingRequest
     {
+        // ESPN's Akamai policy rejects a browser-identifying User-Agent for
+        // this public JSON API while allowing ordinary API clients.
+        $userAgent = parse_url((string) $url, PHP_URL_HOST) === 'site.api.espn.com'
+            ? 'curl/8.14.1'
+            : self::USER_AGENT;
+
         return Http::withHeaders([
-            'User-Agent' => self::USER_AGENT,
+            'User-Agent' => $userAgent,
             'Accept' => 'application/json,text/html,application/xhtml+xml,*/*;q=0.8',
             'Accept-Language' => 'en-AU,en;q=0.9',
         ])

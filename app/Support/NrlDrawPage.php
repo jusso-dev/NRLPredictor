@@ -87,6 +87,7 @@ class NrlDrawPage
         }
 
         return [
+            'sourceEventId' => (string) data_get($event, 'id', ''),
             'type' => 'Match',
             'matchState' => match (data_get($competition, 'status.type.state')) {
                 'post' => 'fulltime',

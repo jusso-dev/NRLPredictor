@@ -53,6 +53,7 @@ class NrlDrawPageTest extends TestCase
         $fixtures = (new NrlDrawPage)->fixtures($http, 2026, 20);
 
         $this->assertCount(1, $fixtures);
+        $this->assertSame('603394', data_get($fixtures, '0.sourceEventId'));
         $this->assertSame('Panthers', data_get($fixtures, '0.homeTeam.nickName'));
         $this->assertSame('fulltime', data_get($fixtures, '0.matchState'));
     }

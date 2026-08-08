@@ -17,6 +17,7 @@ use App\Services\AgentContext;
 use App\Services\CalibrationGrader;
 use App\Services\ModelAlertChecker;
 use App\Services\SignalTuner;
+use App\Support\HttpScraper;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Mockery;
@@ -125,6 +126,52 @@ class SelfImprovingSuggestionsTest extends TestCase
         $this->assertSame($expected->id, $actual?->id);
     }
 
+    public function test_espn_results_sync_try_scorers_idempotently(): void
+    {
+        $home = Team::create(['nrl_slug' => 'panthers', 'name' => 'Panthers']);
+        $away = Team::create(['nrl_slug' => 'broncos', 'name' => 'Broncos']);
+        $round = Round::create(['season' => 2026, 'round_number' => 21]);
+        $match = Matchup::create([
+            'round_id' => $round->id,
+            'home_team_id' => $home->id,
+            'away_team_id' => $away->id,
+            'status' => 'completed',
+        ]);
+        $player = Player::create([
+            'nrl_slug' => 'test-scorer',
+            'name' => 'Test Scorer',
+            'team_id' => $home->id,
+        ]);
+        $http = Mockery::mock(HttpScraper::class);
+        $http->shouldReceive('json')->once()->andReturn([
+            'boxscore' => [
+                'players' => [[
+                    'team' => ['displayName' => 'Panthers'],
+                    'statistics' => [[
+                        'athletes' => [[
+                            'athlete' => ['displayName' => 'Test Scorer'],
+                            'statistics' => [[
+                                'stats' => [[
+                                    'name' => 'tries',
+                                    'value' => 2,
+                                ]],
+                            ]],
+                        ]],
+                    ]],
+                ]],
+            ],
+        ]);
+        $job = new TestableFetchMatchResults;
+        $fixture = [
+            'homeTeam' => ['nickName' => 'Panthers'],
+            'awayTeam' => ['nickName' => 'Broncos'],
+        ];
+
+        $this->assertSame(2, $job->processEspnForTest($http, '603402', $fixture, $round));
+        $this->assertSame(0, $job->processEspnForTest($http, '603402', $fixture, $round));
+        $this->assertSame(2, TryEvent::where('match_id', $match->id)->where('player_id', $player->id)->count());
+    }
+
     public function test_backtest_grades_candidate_weights_by_recomputed_rank(): void
     {
         [$home, $away] = $this->teams();
@@ -200,6 +247,11 @@ class TestableFetchMatchResults extends FetchMatchResults
     public function findForTest(string $home, string $away, int $roundId): ?Matchup
     {
         return $this->findMatch($home, $away, $roundId);
+    }
+
+    public function processEspnForTest(HttpScraper $http, string $eventId, array $fixture, Round $round): int
+    {
+        return $this->processEspnMatch($http, $eventId, $fixture, $round);
     }
 }
 

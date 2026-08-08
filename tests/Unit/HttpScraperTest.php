@@ -9,6 +9,18 @@ use Tests\TestCase;
 
 class HttpScraperTest extends TestCase
 {
+    public function test_it_uses_an_api_client_identity_for_espn_json(): void
+    {
+        config()->set('cache.default', 'array');
+        Http::fake([
+            'site.api.espn.com/*' => Http::response(['events' => []], 200),
+        ]);
+
+        (new HttpScraper)->json('https://site.api.espn.com/test', ['events']);
+
+        Http::assertSent(fn ($request) => $request->hasHeader('User-Agent', 'curl/8.14.1'));
+    }
+
     public function test_it_rejects_html_returned_by_a_json_endpoint(): void
     {
         config()->set('cache.default', 'array');
