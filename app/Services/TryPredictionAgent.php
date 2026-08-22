@@ -45,10 +45,13 @@ Analytical style:
 - Penalise predictions that depend on signals contradicted by news.
 - Use model_learning as prior-round aggregate evidence. Prefer signals_to_trust
   and discount signals_to_discount, but never treat either as proof by itself.
+- Use learned_patterns only when the player has every named signal. Respect lift,
+  sample_size, and confidence; early evidence can support but never drive a pick.
 
 Output:
-Respond with a single JSON object matching the supplied schema. Include 5-8
-players from the supplied top_predictions list, ordered by your conviction.
+Respond with a single JSON object matching the supplied schema. Include only
+players whose evidence warrants changing the statistical score, up to 8.
+An empty adjustments array is valid and preferred when the baseline should hold.
 PROMPT;
 
     protected const ANALYSIS_SCHEMA = [
@@ -58,14 +61,20 @@ PROMPT;
         'properties' => [
             'adjustments' => [
                 'type' => 'array',
-                'minItems' => 1,
+                'maxItems' => 8,
                 'items' => [
                     'type' => 'object',
                     'additionalProperties' => false,
-                    'required' => ['player_id', 'adjusted_score', 'reasoning'],
+                    'required' => ['player_id', 'adjusted_score', 'signal_types', 'reasoning'],
                     'properties' => [
                         'player_id' => ['type' => 'integer'],
                         'adjusted_score' => ['type' => 'integer', 'minimum' => 0, 'maximum' => 100],
+                        'signal_types' => [
+                            'type' => 'array',
+                            'minItems' => 3,
+                            'uniqueItems' => true,
+                            'items' => ['type' => 'string'],
+                        ],
                         'reasoning' => ['type' => 'string', 'minLength' => 10],
                     ],
                 ],
@@ -94,7 +103,10 @@ PROMPT;
             return 0;
         }
 
-        $originalScores = collect($topPredictions)->pluck('score', 'player_id');
+        $originalScores = collect($topPredictions)->pluck('statistical_score', 'player_id');
+        $allowedSignalTypes = collect($topPredictions)->mapWithKeys(fn (array $prediction) => [
+            $prediction['player_id'] => collect($prediction['signals'])->pluck('type')->all(),
+        ]);
 
         $deepStats = [];
         foreach (array_slice($topPredictions, 0, self::TOP_N_DEEP_STATS) as $entry) {
@@ -120,9 +132,20 @@ PROMPT;
             'model_learning' => $this->context->learningContext($match),
         ];
 
+        $encodedPayload = json_encode(
+            $payload,
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR,
+        );
+        Log::info('TryPredictionAgent: compact AI context built', [
+            'match_id' => $matchId,
+            'payload_chars' => strlen($encodedPayload),
+            'players' => count($topPredictions),
+            'signals' => collect($topPredictions)->sum(fn (array $prediction) => count($prediction['signals'])),
+        ]);
+
         $prompt = self::ANALYSIS_SYSTEM
             ."\n\n## Match data\nmatch_id: {$matchId}\n\n```json\n"
-            .json_encode($payload, JSON_PRETTY_PRINT)
+            .$encodedPayload
             ."\n```\n\nReturn the JSON object matching the output schema.";
 
         $raw = $this->codex->exec($prompt, self::ANALYSIS_SCHEMA);
@@ -137,11 +160,13 @@ PROMPT;
             throw new RuntimeException("Codex returned no parseable JSON for match {$matchId}", 0, $e);
         }
 
-        $applied = 0;
-        foreach ((array) ($parsed['adjustments'] ?? []) as $adj) {
+        $submittedAdjustments = (array) ($parsed['adjustments'] ?? []);
+        $validatedAdjustments = [];
+        foreach ($submittedAdjustments as $adj) {
             if (! is_array($adj)
                 || ! is_numeric($adj['player_id'] ?? null)
                 || ! is_numeric($adj['adjusted_score'] ?? null)
+                || ! is_array($adj['signal_types'] ?? null)
                 || ! is_string($adj['reasoning'] ?? null)
                 || strlen($adj['reasoning']) < 10) {
                 Log::warning('TryPredictionAgent: skipping malformed adjustment', ['adjustment' => $adj]);
@@ -152,6 +177,22 @@ PROMPT;
             $playerId = (int) $adj['player_id'];
             if (! $originalScores->has($playerId)) {
                 Log::warning("TryPredictionAgent: skipping adjustment for player outside top predictions: {$playerId}");
+
+                continue;
+            }
+
+            $citedSignals = collect($adj['signal_types'])
+                ->filter(fn ($type) => is_string($type) && $type !== '')
+                ->unique()
+                ->values()
+                ->all();
+            $unknownSignals = array_diff($citedSignals, $allowedSignalTypes[$playerId] ?? []);
+            if (count($citedSignals) < 3 || $unknownSignals !== []) {
+                Log::warning('TryPredictionAgent: skipping adjustment with unsupported signal citations', [
+                    'player_id' => $playerId,
+                    'cited_signals' => $citedSignals,
+                    'unknown_signals' => array_values($unknownSignals),
+                ]);
 
                 continue;
             }
@@ -167,18 +208,54 @@ PROMPT;
                 $score = (int) round($original);
             }
 
-            $updated = Prediction::where('match_id', $matchId)
-                ->where('player_id', $playerId)
-                ->update([
-                    'score' => $score,
-                    'ai_reasoning' => substr($adj['reasoning'], 0, 2000),
-                ]);
-            $applied += $updated;
+            $validatedAdjustments[$playerId] = [
+                'score' => $score,
+                'ai_adjusted_score' => $score,
+                'ai_cited_signals' => $citedSignals,
+                'ai_reasoning' => substr($adj['reasoning'], 0, 2000),
+            ];
         }
 
-        if ($applied > 0) {
-            $this->rerank($matchId);
+        if ($submittedAdjustments !== [] && $validatedAdjustments === []) {
+            throw new RuntimeException("Codex returned no valid adjustments for match {$matchId}");
         }
+
+        $reviewedAt = now();
+        $applied = DB::transaction(function () use ($match, $matchId, $reviewedAt, $validatedAdjustments) {
+            // A successful review replaces the prior review. Start from the
+            // untouched statistical baseline so an empty response means hold,
+            // and repeated runs can never compound earlier AI movement.
+            Prediction::where('match_id', $matchId)
+                ->whereNotNull('statistical_score')
+                ->whereNotNull('statistical_rank')
+                ->get()
+                ->each(fn (Prediction $prediction) => $prediction->update([
+                    'score' => $prediction->statistical_score,
+                    'rank_in_match' => $prediction->statistical_rank,
+                    'ai_adjusted_score' => null,
+                    'ai_cited_signals' => null,
+                    'ai_reviewed_at' => null,
+                    'ai_reasoning' => null,
+                ]));
+
+            $applied = 0;
+            foreach ($validatedAdjustments as $playerId => $adjustment) {
+                $applied += Prediction::where('match_id', $matchId)
+                    ->where('player_id', $playerId)
+                    ->update([...$adjustment, 'ai_reviewed_at' => $reviewedAt]);
+            }
+
+            if ($applied > 0) {
+                $this->rerank($matchId);
+            }
+
+            $match->update([
+                'ai_reviewed_at' => $reviewedAt,
+                'ai_adjustments_count' => $applied,
+            ]);
+
+            return $applied;
+        });
 
         Log::info("TryPredictionAgent: applied {$applied} adjustments for match {$matchId}");
 
@@ -187,12 +264,10 @@ PROMPT;
 
     protected function rerank(int $matchId): void
     {
-        DB::transaction(function () use ($matchId) {
-            Prediction::where('match_id', $matchId)
-                ->orderByDesc('score')
-                ->orderBy('id')
-                ->get()
-                ->each(fn ($p, $i) => $p->update(['rank_in_match' => $i + 1]));
-        });
+        Prediction::where('match_id', $matchId)
+            ->orderByDesc('score')
+            ->orderBy('id')
+            ->get()
+            ->each(fn ($prediction, $index) => $prediction->update(['rank_in_match' => $index + 1]));
     }
 }

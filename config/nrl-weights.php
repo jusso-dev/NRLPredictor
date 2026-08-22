@@ -80,6 +80,8 @@ return [
         'opp_pcm_per_run_concede'    => 6,   // Opp PCM/run conceded — defences that don't anchor
         // Phase 20: rolling-boil attacking momentum
         'team_attacking_streak'      => 6,   // Consecutive recent matches scoring ≥3 tries (max 5)
+        // Outcome-mined compound signal, gated by sample size + repeated-round consistency
+        'learned_pattern'            => 6,
     ],
 
     // ── Match-level signals (applied to all players) ─────
@@ -136,7 +138,6 @@ return [
     'try_milestones'  => [50, 100, 150, 200, 212, 250],
     'game_milestones' => [50, 100, 150, 200, 250, 300, 350],
     'milestone_try_distance'  => 3,  // within N tries of milestone
-    'milestone_game_distance' => 1,  // within N games (i.e. this match)
 
     // ── Venue-to-state mapping for travel detection ───────
     'venue_states' => [

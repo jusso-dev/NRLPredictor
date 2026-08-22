@@ -38,7 +38,7 @@ class AgentContext
     {
         return Prediction::with('player.team')
             ->where('match_id', $match->id)
-            ->orderBy('rank_in_match')
+            ->orderByRaw('COALESCE(statistical_rank, rank_in_match)')
             ->limit($limit)
             ->get()
             ->map(fn ($p) => [
@@ -46,10 +46,39 @@ class AgentContext
                 'name' => $p->player?->name,
                 'team' => $p->player?->team?->name,
                 'position' => $p->player?->position,
-                'score' => $p->score,
-                'rank' => $p->rank_in_match,
-                'signals' => $p->signals,
+                'score' => $p->statistical_score ?? $p->score,
+                'statistical_score' => $p->statistical_score ?? $p->score,
+                'statistical_rank' => $p->statistical_rank ?? $p->rank_in_match,
+                'current_score' => $p->score,
+                'current_rank' => $p->rank_in_match,
+                'signals' => $this->compactSignals($p->signals ?? []),
             ])->all();
+    }
+
+    /**
+     * Keep evidence the AI can act on. Persisted predictions retain the full
+     * signal audit trail; the prompt omits zero/weak rows that add context cost
+     * without changing a recommendation.
+     */
+    protected function compactSignals(array $signals): array
+    {
+        return collect($signals)
+            ->filter(fn (array $signal) => abs((float) ($signal['strength'] ?? 0)) >= 0.6
+                || ($signal['type'] ?? null) === 'learned_pattern')
+            ->map(function (array $signal) {
+                $weight = (float) ($signal['weight'] ?? 0);
+                $strength = (float) ($signal['strength'] ?? 0);
+
+                return [
+                    'type' => $signal['type'] ?? 'unknown',
+                    'weight' => round($weight, 4),
+                    'strength' => round($strength, 4),
+                    'contribution' => round($weight * $strength, 4),
+                    'description' => Str::limit((string) ($signal['description'] ?? ''), 180, '...'),
+                ];
+            })
+            ->values()
+            ->all();
     }
 
     public function playerDeepStats(Player $player): array
@@ -150,10 +179,19 @@ class AgentContext
             'trained_through_round' => $adjustment->after_round,
             'validation_top5_before' => $adjustment->accuracy_before,
             'validation_top5_after' => $adjustment->accuracy_after,
+            'validation_ndcg_before' => $adjustment->ndcg_before,
+            'validation_ndcg_after' => $adjustment->ndcg_after,
+            'validation_matches' => $adjustment->validation_matches,
+            'learning_update_accepted' => $adjustment->candidate_accepted,
+            'learning_step' => $adjustment->learning_step,
             'brier_score' => $adjustment->brier_score,
             'market_brier' => $adjustment->market_brier,
             'signals_to_trust' => $positive,
             'signals_to_discount' => $negative,
+            'learned_patterns' => collect($adjustment->pattern_insights ?? [])
+                ->take(8)
+                ->values()
+                ->all(),
         ];
     }
 

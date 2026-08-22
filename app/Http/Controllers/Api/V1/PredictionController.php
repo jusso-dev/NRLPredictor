@@ -25,11 +25,26 @@ class PredictionController extends Controller
                     'position' => $p->player?->position,
                 ],
                 'score' => $p->score,
+                'statistical_score' => $p->statistical_score,
+                'statistical_rank' => $p->statistical_rank,
+                'ai_adjusted_score' => $p->ai_adjusted_score,
+                'ai_cited_signals' => $p->ai_cited_signals,
+                'ai_delta' => $p->ai_adjusted_score !== null && $p->statistical_score !== null
+                    ? $p->ai_adjusted_score - $p->statistical_score
+                    : null,
+                'ai_reviewed_at' => $p->ai_reviewed_at?->toIso8601String(),
                 'signals' => $p->signals,
                 'ai_reasoning' => $p->ai_reasoning,
             ]);
 
-        return response()->json(['data' => $predictions]);
+        return response()->json([
+            'ai_review' => $match->ai_reviewed_at ? [
+                'reviewed_at' => $match->ai_reviewed_at->toIso8601String(),
+                'adjustments_count' => $match->ai_adjustments_count ?? 0,
+                'held_statistical_baseline' => ($match->ai_adjustments_count ?? 0) === 0,
+            ] : null,
+            'data' => $predictions,
+        ]);
     }
 
     public function leaderboard(): JsonResponse
@@ -52,9 +67,17 @@ class PredictionController extends Controller
                     'team' => $p->player?->team?->short_name ?? $p->player?->team?->name,
                     'position' => $p->player?->position,
                 ],
-                'match' => $p->match ? ($p->match->homeTeam?->short_name . ' v ' . $p->match->awayTeam?->short_name) : null,
+                'match' => $p->match ? ($p->match->homeTeam?->short_name.' v '.$p->match->awayTeam?->short_name) : null,
                 'match_id' => $p->match_id,
                 'score' => $p->score,
+                'statistical_score' => $p->statistical_score,
+                'statistical_rank' => $p->statistical_rank,
+                'ai_adjusted_score' => $p->ai_adjusted_score,
+                'ai_cited_signals' => $p->ai_cited_signals,
+                'ai_delta' => $p->ai_adjusted_score !== null && $p->statistical_score !== null
+                    ? $p->ai_adjusted_score - $p->statistical_score
+                    : null,
+                'ai_reviewed_at' => $p->ai_reviewed_at?->toIso8601String(),
                 'signals' => $p->signals,
                 'ai_reasoning' => $p->ai_reasoning,
             ]);

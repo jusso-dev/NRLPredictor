@@ -47,7 +47,7 @@ app/
 ├── Livewire/              # Dashboard, MatchDetail, Chat, Jobs, Logs, Leaderboard, Accuracy
 ├── Models/                # Eloquent models (Team, Player, Matchup, Prediction, Round, etc.)
 ├── Services/
-│   ├── SignalCalculator.php    # Weighted try-scorer signals (53 as of 2026-07)
+│   ├── SignalCalculator.php    # Weighted try-scorer signals (54 as of 2026-08)
 │   ├── PredictionScorer.php    # Scores players per match, persists top 15
 │   ├── WinPredictor.php        # Weighted match-winner signals (23 as of 2026-07)
 │   ├── MultiBetBuilder.php     # Builds multi-bet suggestions (safe/balanced/value)
@@ -73,7 +73,7 @@ app/
 ## Prediction models
 
 ### Try scorers (SignalCalculator)
-53 weighted signals (sum 452 as of 2026-07 — always derive from `SignalCalculator::WEIGHTS` / `maxPossibleScore()`, never hardcode). Top signals by weight: season_try_rate (20), recent_form (18), position_advantage (15), opponent_edge_weakness (15), opponent_missing_defenders (12). Weights can be overridden by AutoTune (`signal_weight_tunes` table).
+54 weighted signals (sum 458 as of 2026-08 — always derive from `SignalCalculator::WEIGHTS` / `maxPossibleScore()`, never hardcode). Top signals by weight: bookmaker_try_odds (25), season_try_rate (20), recent_form (18), position_advantage (15), opponent_edge_weakness (15). Weights can be overridden by AutoTune (`weight_adjustments` table); `learned_pattern` is a bounded compound interaction gated by repeated prior-round evidence.
 
 ### Match winners (WinPredictor)
 23 weighted signals (sum 253) producing home/away win percentages that always total 100. Stored on `matches` table. Runs as part of `RunPredictionAnalysis`.
@@ -136,7 +136,7 @@ Caveats:
 - `~/.codex/auth.json` contains a refresh token. Do not commit it. Do not bake it into the image.
 - Pro plan usage is for personal use under OpenAI ToS.
 
-The AI pass runs entirely in-process: `TryPredictionAgent` pre-fetches match context, top predictions, deep player stats, and team articles via `AgentContext`, embeds them as JSON in the prompt, calls `codex exec` with a JSON output schema, then validates, clamps (±15 of the statistical score, no upward moves below 15) and applies the adjustments, re-ranking the match afterwards.
+The AI pass runs entirely in-process: `TryPredictionAgent` pre-fetches compact active-signal context, top predictions, deep player stats, and team articles via `AgentContext`, embeds them as JSON in the prompt, calls `codex exec` with a JSON output schema, then validates, clamps (±15 of the preserved statistical score, no upward moves below 15) and applies the adjustments. `statistical_score` / `statistical_rank` never change; `ai_adjusted_score`, `ai_reviewed_at`, and the final `score` / `rank_in_match` make AI impact measurable after results.
 
 ## Testing
 

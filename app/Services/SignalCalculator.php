@@ -267,6 +267,9 @@ class SignalCalculator
         // `team_first_try_rate` (start dominance). Cap at 4; maps [0, 4] → [0, 1].
         // Position share favours back-five + edges who finish high-scoring sets.
         'team_attacking_streak'      => 6,
+        // Outcome-mined multi-signal interaction. Only repeated, directionally
+        // consistent prior-round evidence can activate this bounded modifier.
+        'learned_pattern'            => 6,
     ];
 
     public const POSITION_ADVANTAGE = [
@@ -638,7 +641,25 @@ class SignalCalculator
         $tryMilestones = config('nrl-weights.try_milestones', [50, 100, 150, 200, 212, 250]);
         $gameMilestones = config('nrl-weights.game_milestones', [50, 100, 150, 200, 250, 300, 350]);
         $tryDistance = config('nrl-weights.milestone_try_distance', 3);
-        $gameDistance = config('nrl-weights.milestone_game_distance', 1);
+
+        $events = MilestoneEvent::where('player_id', $player->id)
+            ->where('match_id', $match->id)
+            ->get();
+        if ($events->isNotEmpty()) {
+            $description = $events->map(fn (MilestoneEvent $event) => match ($event->type) {
+                'try_milestone' => sprintf('Chasing try #%d (%d away)', $event->target_count, $event->distance),
+                'game_milestone' => sprintf('Playing %dth NRL game', $event->target_count),
+                'record_chase' => sprintf('Chasing record %d (%d away)', $event->target_count, $event->distance),
+                'themed_round' => 'Featured player in themed round',
+            })->implode('; ');
+
+            return [
+                'type' => 'milestone_game',
+                'weight' => $w['milestone_game'] ?? 8,
+                'strength' => 1.0,
+                'description' => $description,
+            ];
+        }
 
         // Check try milestones
         $careerTries = $player->career_tries ?? 0;
@@ -657,7 +678,7 @@ class SignalCalculator
         // Check game milestones
         $nextGame = ($player->career_games ?? 0) + 1;
         foreach ($gameMilestones as $target) {
-            if (abs($nextGame - $target) <= $gameDistance) {
+            if ($nextGame === $target) {
                 return [
                     'type' => 'milestone_game',
                     'weight' => $w['milestone_game'] ?? 8,

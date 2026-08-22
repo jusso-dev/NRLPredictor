@@ -20,5 +20,11 @@ class WeightAdjustment extends Model
         'market_brier' => 'float',
         'market_log_loss' => 'float',
         'graded_predictions' => 'integer',
+        'validation_matches' => 'integer',
+        'ndcg_before' => 'float',
+        'ndcg_after' => 'float',
+        'candidate_accepted' => 'boolean',
+        'learning_step' => 'float',
+        'pattern_insights' => 'array',
     ];
 }

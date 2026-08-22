@@ -40,6 +40,8 @@ class MatchDetail extends Component
     #[Layout('layouts.app')]
     public function render()
     {
+        $this->match->refresh()->loadMissing(['homeTeam', 'awayTeam', 'round']);
+
         $predictions = $this->match->predictions()
             ->with('player.team')
             ->orderBy('rank_in_match')

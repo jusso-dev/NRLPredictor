@@ -21,6 +21,8 @@ class Matchup extends Model
         'win_signals' => 'array',
         'home_win_pct' => 'integer',
         'away_win_pct' => 'integer',
+        'ai_reviewed_at' => 'datetime',
+        'ai_adjustments_count' => 'integer',
     ];
 
     public function round(): BelongsTo

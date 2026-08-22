@@ -60,11 +60,18 @@ class CodexClient
             $process->run();
 
             if (! $process->isSuccessful()) {
+                $stderr = $process->getErrorOutput();
                 Log::error('codex exec failed', [
                     'exit_code' => $process->getExitCode(),
-                    'stderr' => substr($process->getErrorOutput(), 0, 500),
+                    'stderr' => substr($stderr, 0, 500),
                 ]);
-                throw new RuntimeException('codex failed: '.substr($process->getErrorOutput(), 0, 300));
+                if (self::isAuthenticationFailure($stderr)) {
+                    throw new CodexAuthenticationException(
+                        'Codex authentication expired. Run `codex login` on the Docker host, then retry the AI review.',
+                    );
+                }
+
+                throw new RuntimeException('codex failed: '.substr($stderr, 0, 300));
             }
 
             $message = (string) file_get_contents($lastMessagePath);
@@ -77,6 +84,14 @@ class CodexClient
                 @unlink($schemaPath);
             }
         }
+    }
+
+    public static function isAuthenticationFailure(string $stderr): bool
+    {
+        return preg_match(
+            '/failed to refresh token|access token could not be refreshed|not logged in|please run (?:`?codex )?login/i',
+            $stderr,
+        ) === 1;
     }
 
     /**

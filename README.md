@@ -7,7 +7,6 @@ Signal-driven NRL match and try-scorer prediction engine. Scrapes live data from
 ![PHP](https://img.shields.io/badge/PHP-8.3-777BB4?logo=php&logoColor=white)
 ![Laravel](https://img.shields.io/badge/Laravel-11-FF2D20?logo=laravel&logoColor=white)
 ![Livewire](https://img.shields.io/badge/Livewire-3-4E56A6)
-![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -136,7 +135,7 @@ Signals fall into a few buckets:
 - **Opponent weakness** — missing edge defenders, opponent try-concede rate, post-contact metres conceded, completion-pressure, late-game concede share, first-try concede share, yardage conceded, set-concede rate, explosive-rate conceded, opponent ruck penalties.
 - **Market signals** — anytime try-scorer bookmaker odds, match total line, team favouritism (when `ODDS_API_KEY` is configured).
 
-Signal weights live in `config/nrl-weights.php` and may be overlaid by tuned weights stored in `signal_weight_runs`. Each signal returns a structured `type / weight / strength / description` tuple so the UI can render a per-leg explanation.
+Signal weights live in `config/nrl-weights.php` and may be overlaid by validated tuned weights stored in `weight_adjustments`. Each signal returns a structured `type / weight / strength / description` tuple so the UI can render a per-leg explanation.
 
 ### Match winner signals (`WinPredictor`)
 
@@ -144,14 +143,14 @@ Each match gets a home/away win probability from a stack of differential signals
 
 ### AI review (optional)
 
-When `--ai` is passed or the scheduler fires `DispatchAiAnalysisFanout`, each match is sent to the Python agent service. The AI agent:
+When `--ai` is passed or the scheduler fires `DispatchAiAnalysisFanout`, each match is reviewed in-process through the Codex CLI. The AI reviewer:
 
-1. Reads match context, team lists, injuries via tool calls back into Laravel
-2. Reviews the statistical predictions
+1. Reads a compact evidence payload containing match context, team lists, injuries, active signals, and learned patterns
+2. Reviews the preserved statistical predictions
 3. Checks team articles for narrative factors
-4. Submits adjusted scores and reasoning per player
+4. Submits only evidence-backed bounded changes; holding the statistical baseline is a valid review outcome
 
-AI reasoning is stored in `predictions.ai_reasoning`.
+The untouched baseline is stored in `statistical_score` / `statistical_rank`; AI evidence is stored in `ai_adjusted_score`, `ai_reasoning`, and `ai_reviewed_at`. Completed outcomes compare both rankings on the Learning page, so AI lift or regression is visible rather than assumed.
 
 ### Multi-bet builder (`MultiBetBuilder`)
 
@@ -178,6 +177,7 @@ Built with **Livewire 3** + **Tailwind CSS**. Dark/light theme toggle.
 | `/match/{id}` | Match detail | Win prediction breakdown with per-team signals, ranked try scorer list with signal bars and descriptions, expandable AI reasoning, injury panels, milestone alerts |
 | `/leaderboard` | Leaderboard | Cross-round try scorer rankings |
 | `/accuracy` | Accuracy | Prediction accuracy tracking |
+| `/learning` | Learning | Observed weekly trend, guarded updates, live compound patterns, AI lift, and AI health |
 | `/chat` | Chat | Conversational AI interface — ask about try scorers, matchups, player stats, injuries |
 | `/jobs` | Jobs | Background job monitoring |
 | `/logs` | Logs | Application log viewer |
@@ -246,6 +246,14 @@ GET /api/v1/matches/{id}/predictions  — Try scorer predictions for a match
 GET /api/v1/predictions/leaderboard   — Top 30 try scorers this round
 ```
 
+### Learning evidence
+
+```
+GET /api/v1/learning                  — Observed trend, validation, patterns, AI lift and health
+    ?season=2026                      — Optional season (defaults to current year)
+GET /api/v1/methodology               — Signal weights, thresholds and leakage controls
+```
+
 ### Teams & Players
 
 ```
@@ -283,14 +291,15 @@ Key tables:
 | `rounds` | Season rounds with start/end dates |
 | `matches` | Fixtures with scores, status, win predictions, win signals |
 | `match_team_lists` | Named team lists per match (player + position number) |
-| `predictions` | Ranked try-scorer predictions with signal arrays and AI reasoning |
+| `predictions` | Final rankings plus preserved statistical score/rank, validated AI adjustment, cited signals, and reasoning |
 | `injuries` | Active injury reports per player |
 | `suspensions` | Suspension records with games remaining |
 | `try_events` | Historical try scoring events |
 | `player_venue_stats` | Per-player try rate at each venue |
 | `player_opponent_stats` | Per-player try rate vs each opponent |
 | `articles` | NRL.com articles tagged by team |
-| `data_fetch_logs` | Scraper job audit trail |
+| `weight_adjustments` | Guarded tuning runs, validation metrics, signal deltas, and discovered patterns |
+| `data_fetch_logs` | Scraper and AI job audit trail |
 
 ## Environment variables
 
@@ -344,9 +353,9 @@ ios/                      Native SwiftUI client (see ios/README.md)
 
 ## Roadmap
 
-- Backtesting harness that replays historic rounds against the live signal stack to track per-signal accuracy deltas.
-- Auto-tuning loop that nudges signal weights based on accuracy-report deltas (`signal_weight_runs` table already in place).
-- Public dashboard hosted somewhere persistent so the API can be poked at without standing up Docker locally.
+- Confidence intervals for AI lift once enough post-baseline reviewed matches have completed.
+- Higher-order pattern discovery after pairwise patterns accumulate enough out-of-sample evidence.
+- Public dashboard hosting so the API can be explored without standing up Docker locally.
 
 ## License
 

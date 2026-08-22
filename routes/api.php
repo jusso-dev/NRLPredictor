@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\MatchController;
+use App\Http\Controllers\Api\V1\LearningController;
 use App\Http\Controllers\Api\V1\MethodologyController;
 use App\Http\Controllers\Api\V1\MultiBetController;
 use App\Http\Controllers\Api\V1\OddsController;
@@ -43,4 +44,5 @@ Route::prefix('v1')->group(function () {
     Route::get('/matches/{match}/odds', [OddsController::class, 'forMatch']);
 
     Route::get('/methodology', [MethodologyController::class, 'index']);
+    Route::get('/learning', [LearningController::class, 'index']);
 });

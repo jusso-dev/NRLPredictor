@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Jobs\Concerns\LogsDataFetch;
 use App\Models\Matchup;
+use App\Services\CodexAuthenticationException;
 use App\Services\TryPredictionAgent;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -99,6 +100,14 @@ class AnalyseMatchWithAi implements ShouldBeUnique, ShouldQueue
 
             $applied = $agent->analyse($this->matchId);
             $this->completeLog($applied);
+        } catch (CodexAuthenticationException $e) {
+            // OAuth expiry is persistent until an operator signs in again.
+            // Record an actionable health failure, but do not retry every match
+            // and flood failed_jobs with an error the worker cannot repair.
+            $this->failLog($e);
+            Log::critical('AnalyseMatchWithAi: Codex authentication unavailable; retry after host login', [
+                'match_id' => $this->matchId,
+            ]);
         } catch (Throwable $e) {
             $this->failLog($e);
             throw $e;

@@ -12,7 +12,12 @@ class Prediction extends Model
     protected $casts = [
         'signals' => 'array',
         'score' => 'integer',
+        'statistical_score' => 'integer',
         'rank_in_match' => 'integer',
+        'statistical_rank' => 'integer',
+        'ai_cited_signals' => 'array',
+        'ai_adjusted_score' => 'integer',
+        'ai_reviewed_at' => 'datetime',
         'version' => 'integer',
         'model_prob' => 'float',
         'market_prob' => 'float',
@@ -53,6 +58,7 @@ class Prediction extends Model
                 'venue_record' => ['label' => 'VENUE', 'class' => 'chip-green'],
                 'head_to_head' => ['label' => 'MATCHUP', 'class' => 'chip-blue'],
                 'returning_player' => ['label' => 'RETURNING', 'class' => 'chip-orange'],
+                'learned_pattern' => ['label' => 'LEARNED PATTERN', 'class' => 'chip-gold'],
                 'opponent_edge_weakness', 'opponent_missing_defenders' => ['label' => 'OPP. WEAK', 'class' => 'chip-purple'],
                 default => null,
             };

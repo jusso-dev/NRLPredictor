@@ -1,4 +1,4 @@
-<div class="space-y-8">
+<div class="space-y-8" wire:poll.15s>
     <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
             <a href="{{ route('dashboard') }}" class="lbl mb-3 inline-block text-bone-400 hover:text-gold-400">
@@ -31,6 +31,20 @@
             <span wire:loading wire:target="reanalyse">Analysing…</span>
         </button>
     </div>
+
+    @if ($match->ai_reviewed_at)
+        <div class="card flex flex-wrap items-center justify-between gap-2 border-gold-500/30 p-4">
+            <div>
+                <div class="text-sm font-medium text-bone-100">
+                    AI reviewed · {{ $match->ai_adjustments_count > 0 ? $match->ai_adjustments_count.' score '.($match->ai_adjustments_count === 1 ? 'change' : 'changes') : 'held statistical baseline' }}
+                </div>
+                <div class="mt-1 text-xs text-bone-400">{{ $match->ai_reviewed_at->diffForHumans() }} · every change requires three verified active signals</div>
+            </div>
+            <span class="chip {{ $match->ai_adjustments_count > 0 ? 'chip-blue' : 'chip-green' }}">
+                {{ $match->ai_adjustments_count > 0 ? 'AI adjusted' : 'no change' }}
+            </span>
+        </div>
+    @endif
 
     @if ($tryEvents->isNotEmpty())
         <div class="card p-5">
@@ -181,6 +195,15 @@
                                 @foreach (array_slice($prediction->advantageTags(), 0, 3) as $tag)
                                     <span class="chip {{ $tag['class'] }}">{{ $tag['label'] }}</span>
                                 @endforeach
+                                @if ($prediction->ai_adjusted_score !== null && $prediction->statistical_score !== null)
+                                    @php($aiDelta = $prediction->ai_adjusted_score - $prediction->statistical_score)
+                                    <span class="chip {{ $aiDelta > 0 ? 'chip-green' : ($aiDelta < 0 ? 'chip-red' : 'chip-muted') }}">
+                                        AI {{ $aiDelta > 0 ? '+' : '' }}{{ $aiDelta }} from {{ $prediction->statistical_score }}
+                                    </span>
+                                    @if ($prediction->statistical_rank !== $prediction->rank_in_match)
+                                        <span class="text-[11px] text-bone-400">R{{ $prediction->statistical_rank }} → R{{ $prediction->rank_in_match }}</span>
+                                    @endif
+                                @endif
                             </div>
                             <div class="mt-2 flex items-center gap-3">
                                 <div class="score-bar flex-1">
@@ -217,6 +240,18 @@
                                 <p class="text-sm leading-relaxed text-bone-200">
                                     {{ $prediction->ai_reasoning ?: 'Awaiting AI review — showing statistical signals only.' }}
                                 </p>
+                                @if ($prediction->ai_reviewed_at)
+                                    <div class="mt-2 text-[11px] text-bone-500">
+                                        Reviewed {{ $prediction->ai_reviewed_at->diffForHumans() }} against statistical score {{ $prediction->statistical_score }}.
+                                    </div>
+                                @endif
+                                @if ($prediction->ai_cited_signals)
+                                    <div class="mt-3 flex flex-wrap gap-1.5">
+                                        @foreach ($prediction->ai_cited_signals as $signalType)
+                                            <span class="chip chip-blue">{{ str_replace('_', ' ', $signalType) }}</span>
+                                        @endforeach
+                                    </div>
+                                @endif
                             </div>
                             <div>
                                 <div class="lbl mb-2">Signals</div>

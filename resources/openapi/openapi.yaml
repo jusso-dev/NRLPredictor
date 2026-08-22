@@ -249,6 +249,12 @@ paths:
                 type: object
                 required: [data]
                 properties:
+                  ai_review:
+                    type: [object, "null"]
+                    properties:
+                      reviewed_at: { type: string, format: date-time }
+                      adjustments_count: { type: integer, minimum: 0, maximum: 8 }
+                      held_statistical_baseline: { type: boolean }
                   data:
                     type: array
                     items: { $ref: "#/components/schemas/Prediction" }
@@ -451,6 +457,26 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Methodology" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/learning:
+    get:
+      tags: [Meta]
+      summary: Live self-improvement evidence
+      description: Observed completed-round outcomes, guarded validation, discovered signal patterns, AI lift, and AI availability.
+      operationId: getLearningEvidence
+      parameters:
+        - in: query
+          name: season
+          schema: { type: integer, minimum: 2000, maximum: 2100 }
+          description: Defaults to the current year.
+      responses:
+        "200":
+          description: Current learning evidence
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LearningEvidence" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
 
   /api/chat:
     post:
@@ -801,8 +827,36 @@ components:
           type: integer
           minimum: 0
           maximum: 100
-          description: Normalised within the match, so the top pick is always ~100.
+          description: Final score after any AI review. Normalised within the match before AI adjustment.
           examples: [100]
+        statistical_score:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 100
+          description: Untouched deterministic score saved before AI review. Null for legacy predictions.
+        statistical_rank:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 15
+          description: Untouched deterministic rank saved before AI review. Null for legacy predictions.
+        ai_adjusted_score:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 100
+          description: Score submitted by the bounded AI review, if this player was reviewed.
+        ai_cited_signals:
+          type: [array, "null"]
+          minItems: 3
+          description: Active prediction signals explicitly cited and server-validated for this AI adjustment.
+          items: { type: string }
+        ai_delta:
+          type: [integer, "null"]
+          minimum: -15
+          maximum: 15
+          description: AI-adjusted score minus the statistical baseline.
+        ai_reviewed_at:
+          type: [string, "null"]
+          format: date-time
         signals:
           type: [array, "null"]
           items: { $ref: "#/components/schemas/Signal" }
@@ -1024,6 +1078,92 @@ components:
             error: { type: string, examples: ["No current round found"] }
         responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }
 
+    LearningEvidence:
+      type: object
+      required: [season, observed_outcomes, validation, patterns, ai_impact, ai_health]
+      properties:
+        season: { type: integer, examples: [2026] }
+        observed_outcomes:
+          type: object
+          properties:
+            completed_rounds: { type: integer }
+            graded_matches: { type: integer }
+            completed_matches: { type: integer }
+            coverage_pct: { type: number, format: float }
+            latest_accuracy: { type: [number, "null"], format: float }
+            rolling_accuracy: { type: [number, "null"], format: float }
+            prior_rolling_accuracy: { type: [number, "null"], format: float }
+            rolling_change: { type: [number, "null"], format: float }
+            state: { type: string, enum: [collecting, improving, declining, held] }
+            rounds:
+              type: array
+              items:
+                type: object
+                properties:
+                  round: { type: integer }
+                  hits: { type: integer }
+                  picks: { type: integer }
+                  accuracy: { type: number, format: float }
+                  rolling_rounds: { type: integer }
+                  rolling_accuracy: { type: number, format: float }
+                  graded_matches: { type: integer }
+                  completed_matches: { type: integer }
+        validation:
+          type: [object, "null"]
+          properties:
+            after_round: { type: integer }
+            matches: { type: [integer, "null"] }
+            top5_before: { type: [number, "null"], format: float }
+            top5_after: { type: [number, "null"], format: float }
+            ndcg_before: { type: [number, "null"], format: float }
+            ndcg_after: { type: [number, "null"], format: float }
+            candidate_accepted: { type: [boolean, "null"] }
+            learning_step: { type: [number, "null"], format: float }
+            brier_score: { type: [number, "null"], format: float }
+        patterns:
+          type: [object, "null"]
+          description: Live rolling pattern snapshot through the latest fully completed round.
+          properties:
+            rounds_analyzed: { type: integer }
+            matches_analyzed: { type: integer }
+            predictions_graded: { type: integer }
+            baseline_hit_rate: { type: number, format: float }
+            patterns:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+                properties:
+                  key: { type: string }
+                  label: { type: string }
+                  signals: { type: array, items: { type: string } }
+                  sample_size: { type: integer }
+                  rounds: { type: integer }
+                  hit_rate: { type: number, format: float }
+                  baseline_hit_rate: { type: number, format: float }
+                  lift: { type: number, format: float }
+                  direction_consistency: { type: number, format: float }
+                  confidence: { type: string, enum: [early, developing, established] }
+                  is_actionable: { type: boolean }
+        ai_impact:
+          type: object
+          properties:
+            reviewed_matches: { type: integer }
+            adjusted_predictions: { type: integer }
+            statistical_top5_accuracy: { type: number, format: float }
+            ai_top5_accuracy: { type: number, format: float }
+            lift: { type: number, format: float }
+            helped_matches: { type: integer }
+            hurt_matches: { type: integer }
+            held_matches: { type: integer }
+            rounds: { type: array, items: { type: object, additionalProperties: true } }
+        ai_health:
+          type: object
+          properties:
+            state: { type: string, enum: [waiting, running, success, failed] }
+            last_run_at: { type: [string, "null"], format: date-time }
+            failures_24h: { type: integer }
+
     Methodology:
       type: object
       properties:
@@ -1031,7 +1171,7 @@ components:
           type: object
           properties:
             description: { type: string }
-            max_raw_score: { type: integer, examples: [452] }
+            max_raw_score: { type: number, examples: [458] }
             signals:
               type: array
               description: Sorted by weight, descending.
@@ -1039,7 +1179,7 @@ components:
                 type: object
                 properties:
                   type: { type: string }
-                  weight: { type: integer }
+                  weight: { type: number, format: float }
                   pct_of_total: { type: number, format: float }
             position_weights:
               type: object
@@ -1084,4 +1224,18 @@ components:
           properties:
             description: { type: string }
             model: { type: string }
+            measurement: { type: string }
+        self_improvement:
+          type: object
+          properties:
+            validation_window_rounds: { type: integer, examples: [8] }
+            candidate_guardrail: { type: string }
+            pattern_activation:
+              type: object
+              properties:
+                minimum_sample: { type: integer, examples: [12] }
+                minimum_rounds: { type: integer, examples: [3] }
+                minimum_absolute_lift_points: { type: number, examples: [5] }
+                minimum_direction_consistency: { type: number, examples: [0.67] }
+            leakage_control: { type: string }
         responsible_gambling: { $ref: "#/components/schemas/ResponsibleGambling" }

@@ -8,7 +8,10 @@ use Illuminate\Support\Facades\DB;
 
 class PredictionScorer
 {
-    public function __construct(protected SignalCalculator $signals) {}
+    public function __construct(
+        protected SignalCalculator $signals,
+        protected ?LearnedPatternSignal $learnedPatterns = null,
+    ) {}
 
     /**
      * Score every player in a match, return the persisted top-15 predictions ordered by rank.
@@ -33,6 +36,11 @@ class PredictionScorer
             if (! $player) continue;
 
             $signals = $this->signals->calculate($player, $match);
+            $learnedPattern = ($this->learnedPatterns ?? app(LearnedPatternSignal::class))
+                ->forMatch($signals, $match, (float) ($effectiveWeights['learned_pattern'] ?? 6));
+            if ($learnedPattern) {
+                $signals[] = $learnedPattern;
+            }
             $raw = 0.0;
             $activeSignalCount = 0;
             foreach ($signals as $s) {
@@ -69,6 +77,10 @@ class PredictionScorer
             // Only delete predictions for matches that haven't completed yet
             if ($match->status !== 'completed') {
                 Prediction::where('match_id', $match->id)->delete();
+                $match->update([
+                    'ai_reviewed_at' => null,
+                    'ai_adjustments_count' => null,
+                ]);
             } else {
                 // For completed matches, skip if predictions already exist
                 if (Prediction::where('match_id', $match->id)->exists()) {
@@ -82,7 +94,9 @@ class PredictionScorer
                     'match_id' => $match->id,
                     'player_id' => $row['player_id'],
                     'score' => max(0, min(100, $score)),
-                    'rank_in_match' => $rank++,
+                    'statistical_score' => max(0, min(100, $score)),
+                    'rank_in_match' => $rank,
+                    'statistical_rank' => $rank++,
                     'signals' => $row['signals'],
                     'version' => $version,
                 ]);

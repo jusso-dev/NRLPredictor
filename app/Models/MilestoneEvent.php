@@ -9,6 +9,12 @@ class MilestoneEvent extends Model
 {
     protected $guarded = [];
 
+    protected $casts = [
+        'current_count' => 'integer',
+        'target_count' => 'integer',
+        'distance' => 'integer',
+    ];
+
     public function player(): BelongsTo
     {
         return $this->belongsTo(Player::class);

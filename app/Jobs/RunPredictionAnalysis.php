@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Jobs\Concerns\LogsDataFetch;
 use App\Models\Matchup;
+use App\Services\MilestoneDetector;
 use App\Services\PredictionScorer;
 use App\Services\WinPredictor;
 use Illuminate\Bus\Queueable;
@@ -37,7 +38,11 @@ class RunPredictionAnalysis implements ShouldQueue, ShouldBeUnique
         return 'prediction-scoring:'.($this->matchId ?? 'current-round');
     }
 
-    public function handle(PredictionScorer $scorer, WinPredictor $winPredictor): void
+    public function handle(
+        PredictionScorer $scorer,
+        WinPredictor $winPredictor,
+        MilestoneDetector $milestones,
+    ): void
     {
         $this->startLog('internal.prediction');
         $scored = 0;
@@ -80,6 +85,7 @@ class RunPredictionAnalysis implements ShouldQueue, ShouldBeUnique
                     continue;
                 }
 
+                $milestones->syncForMatch($match);
                 $predictions = $scorer->score($match->id);
                 if (empty($predictions)) {
                     Log::warning(sprintf('RunPredictionAnalysis: match %d produced 0 predictions', $match->id));

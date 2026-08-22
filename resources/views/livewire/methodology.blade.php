@@ -17,7 +17,9 @@
                 ['Player Stats', 'nrl.com player profiles', 'Career games, tries, try assists, line breaks, season stats', 'Every 2 hours'],
                 ['Injuries', 'nrl.com casualty ward', 'Injury type, status (out/doubt/test), player affected', 'Every 30 min'],
                 ['Articles', 'nrl.com news feed', 'Team-tagged articles for narrative context (coach quotes, team news)', 'Every 6 hours'],
-                ['Live Scores', 'nrl.com live data', 'In-play scores, try events, match status updates', 'Every 5 min (when live)'],
+                ['Results', 'ESPN event summaries', 'Final scores and idempotently matched try scorers used by the learning loop', 'After completed rounds'],
+                ['Market Odds', 'The Odds API', 'AU bookmaker win, totals, spreads, and anytime try-scorer prices', 'Every 4 hours'],
+                ['Weather', 'Open-Meteo', 'Kickoff temperature, rainfall, humidity, and wind forecast', 'Daily + on sync'],
             ] as [$title, $source, $desc, $freq])
                 <div class="card p-4">
                     <div class="font-medium text-bone-50">{{ $title }}</div>
@@ -31,7 +33,7 @@
 
     {{-- Try scorer signals --}}
     <section>
-        <div class="lbl mb-2">Try Scorer Prediction — 11 Signals</div>
+        <div class="lbl mb-2">Try Scorer Prediction — {{ $trySignals->count() }} Signals</div>
         <p class="mb-4 max-w-3xl text-xs text-bone-400">
             Each player in the team list is scored against {{ $trySignals->count() }} weighted signals.
             The maximum possible raw score is {{ $tryMaxScore }}. Scores are normalized to 0-100 per match
@@ -87,7 +89,7 @@
 
     {{-- Win prediction signals --}}
     <section>
-        <div class="lbl mb-2">Match Winner Prediction — 7 Signals</div>
+        <div class="lbl mb-2">Match Winner Prediction — {{ $winSignals->count() }} Signals</div>
         <p class="mb-4 max-w-3xl text-xs text-bone-400">
             Each match gets a home/away win probability from {{ $winSignals->count() }} signals.
             The total weight pool is {{ $winMaxScore }}. Each team's signals are scored independently,
@@ -159,9 +161,32 @@
                     When enabled, an AI analyst reviews the statistical predictions using all available context:
                     team lists, injuries, venue history, recent news articles, and coaching commentary.
                     It can adjust scores by up to +/-15 points and adds written reasoning explaining
-                    compound advantages or contradictions the model can't capture.
+                    compound advantages or contradictions the model can't capture. It may also hold
+                    the statistical baseline when no evidence-backed change is warranted.
                 </div>
             </div>
+        </div>
+    </section>
+
+    <section>
+        <div class="lbl mb-2">How the Model Improves</div>
+        <p class="mb-4 max-w-3xl text-xs text-bone-400">
+            Learning is outcome-driven and time-bounded. Future results are never allowed into an earlier prediction.
+        </p>
+        <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            @foreach ([
+                ['1. Save the baseline', 'Every pre-match statistical score and rank is preserved before optional AI review.'],
+                ['2. Grade real outcomes', 'Completed matches identify hits, misses, top-five accuracy, NDCG ranking quality, calibration, and market comparison.'],
+                ['3. Discover combinations', 'Signal pairs are compared with the rolling baseline. A pattern needs 12 picks, 3 rounds, 5 points of lift, and 67% directional consistency before activation.'],
+                ['4. Reject regressions', 'Candidate weight changes must hold or improve both top-five accuracy and NDCG across the rolling validation window.'],
+                ['5. Learn forward only', 'Accepted weights and compound patterns can affect later rounds only. Learned patterns are bounded to prevent one insight dominating the ranking.'],
+                ['6. Measure the AI', 'The final AI-reviewed top five is compared with the saved statistical top five after results arrive, including helped, hurt, and unchanged matches.'],
+            ] as [$title, $description])
+                <div class="card p-4">
+                    <div class="font-medium text-bone-50">{{ $title }}</div>
+                    <div class="mt-2 text-xs leading-relaxed text-bone-400">{{ $description }}</div>
+                </div>
+            @endforeach
         </div>
     </section>
 
@@ -178,7 +203,7 @@
             </div>
             <div class="card flex items-center gap-2 px-3 py-2">
                 <span class="chip chip-gold">MILESTONE</span>
-                <span class="text-xs text-bone-400">Near 50th/100th/150th/200th game</span>
+                <span class="text-xs text-bone-400">Exact 50th/100th/150th/200th game or documented try/record chase</span>
             </div>
             <div class="card flex items-center gap-2 px-3 py-2">
                 <span class="chip chip-green">VENUE</span>

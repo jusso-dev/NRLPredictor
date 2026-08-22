@@ -38,6 +38,7 @@ class SignalTuner
     public function __construct(
         protected CalibrationGrader $grader,
         protected ModelAlertChecker $alertChecker,
+        protected ?SignalPatternAnalyzer $patternAnalyzer = null,
     ) {}
 
     /**
@@ -85,6 +86,11 @@ class SignalTuner
         // probabilities and was_hit flags; returns round-level Brier/log-loss/value.
         $calibration = $this->grader->gradeRound($season, $roundNumber);
 
+        // Discover compound conditions (for example milestone + hot form)
+        // whose hit rate differs from the rolling prediction baseline.
+        $patternReport = ($this->patternAnalyzer ?? app(SignalPatternAnalyzer::class))
+            ->analyze($season, $roundNumber);
+
         // Step 6: Persist (DB row is the source of truth; SignalCalculator reads this back)
         $adjustment = $this->persistAdjustment(
             $season,
@@ -97,6 +103,7 @@ class SignalTuner
             $validationBefore,
             $validationAfter,
             $candidateAccepted,
+            $patternReport,
         );
 
         // Step 6b: Check rolling Brier-vs-market trend; raise/resolve an alert
@@ -113,14 +120,19 @@ class SignalTuner
         // Step 8: Generate agent prompt insights
         $insights = $this->generateInsights($cumulativeDeltas, $signalStats, $accuracyBefore, $calibration);
 
-        Log::info("SignalTuner: tuned after R{$roundNumber}. Accuracy={$accuracyBefore}%. ".count($newWeights).' weights adjusted. '.($calibration['summary'] ?? ''));
+        $weightsChanged = collect($currentWeights)
+            ->filter(fn ($value, $type) => ($newWeights[$type] ?? $value) !== $value)
+            ->count();
+
+        Log::info("SignalTuner: tuned after R{$roundNumber}. Accuracy={$accuracyBefore}%. {$weightsChanged} weights adjusted. ".($calibration['summary'] ?? ''));
 
         return [
             'round' => $roundNumber,
             'accuracy' => $accuracyBefore,
             'signals_graded' => count($signalStats),
-            'weights_changed' => collect($currentWeights)->filter(fn ($v, $k) => ($newWeights[$k] ?? $v) !== $v)->count(),
+            'weights_changed' => $weightsChanged,
             'insights' => $insights,
+            'patterns' => $patternReport,
             'adjustment_id' => $adjustment->id,
             'calibration' => $calibration,
             'validation' => [
@@ -449,6 +461,7 @@ class SignalTuner
         array $validationBefore = [],
         array $validationAfter = [],
         bool $candidateAccepted = true,
+        array $patternReport = [],
     ): WeightAdjustment {
         $changed = [];
         foreach ($new as $type => $weight) {
@@ -464,6 +477,7 @@ class SignalTuner
             $validationBefore,
             $validationAfter,
             $candidateAccepted,
+            $patternReport,
         );
 
         return WeightAdjustment::create([
@@ -480,6 +494,12 @@ class SignalTuner
             'market_brier' => $calibration['market_brier'] ?? null,
             'market_log_loss' => $calibration['market_log_loss'] ?? null,
             'graded_predictions' => $calibration['graded'] ?? null,
+            'validation_matches' => $validationBefore['matches'] ?? null,
+            'ndcg_before' => $validationBefore['ndcg'] ?? null,
+            'ndcg_after' => $validationAfter['ndcg'] ?? null,
+            'candidate_accepted' => $candidateAccepted,
+            'learning_step' => $candidateAccepted ? ($validationAfter['step_scale'] ?? null) : null,
+            'pattern_insights' => $patternReport['patterns'] ?? [],
             'reasoning' => $reasoning,
         ]);
     }
@@ -491,6 +511,7 @@ class SignalTuner
         array $validationBefore = [],
         array $validationAfter = [],
         bool $candidateAccepted = true,
+        array $patternReport = [],
     ): string {
         $lines = ["Round accuracy: {$accuracy}%"];
 
@@ -515,6 +536,26 @@ class SignalTuner
             $lines[] = $calibration['summary'];
         }
 
+        $strongestPattern = collect($patternReport['patterns'] ?? [])
+            ->filter(fn (array $pattern) => ($pattern['lift'] ?? 0) > 0)
+            ->sortBy([
+                ['is_actionable', 'desc'],
+                ['sample_size', 'desc'],
+                ['lift', 'desc'],
+            ])
+            ->first();
+        if ($strongestPattern) {
+            $lines[] = sprintf(
+                'Strongest compound pattern: %s, %.1f%% hit rate vs %.1f%% baseline (%+.1f points, n=%d, %s evidence)',
+                $strongestPattern['label'],
+                $strongestPattern['hit_rate'],
+                $strongestPattern['baseline_hit_rate'],
+                $strongestPattern['lift'],
+                $strongestPattern['sample_size'],
+                $strongestPattern['confidence'],
+            );
+        }
+
         if (empty($changed)) {
             $lines[] = $candidateAccepted
                 ? 'No relative weight changes — signals performed within the current range.'
@@ -526,7 +567,7 @@ class SignalTuner
         foreach ($changed as $type => $info) {
             $direction = $info['to'] > $info['from'] ? 'increased' : 'decreased';
             $lines[] = sprintf(
-                '%s: %d → %d (%s, delta=%.3f)',
+                '%s: %.4f → %.4f (%s, delta=%.3f)',
                 str_replace('_', ' ', $type),
                 $info['from'], $info['to'], $direction, $info['delta']
             );
