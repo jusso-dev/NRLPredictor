@@ -72,7 +72,6 @@ PROMPT;
                         'signal_types' => [
                             'type' => 'array',
                             'minItems' => 3,
-                            'uniqueItems' => true,
                             'items' => ['type' => 'string'],
                         ],
                         'reasoning' => ['type' => 'string', 'minLength' => 10],

@@ -215,6 +215,16 @@ class SelfImprovingSuggestionsTest extends TestCase
             ->assertSee('every change requires three verified active signals');
     }
 
+    public function test_ai_output_schema_avoids_unsupported_codex_keywords(): void
+    {
+        $reflection = new \ReflectionClass(TryPredictionAgent::class);
+        $schema = $reflection->getReflectionConstant('ANALYSIS_SCHEMA')->getValue();
+        $signalTypes = $schema['properties']['adjustments']['items']['properties']['signal_types'];
+
+        $this->assertSame(3, $signalTypes['minItems']);
+        $this->assertArrayNotHasKey('uniqueItems', $signalTypes);
+    }
+
     public function test_expired_codex_auth_is_logged_without_retrying_the_match_job(): void
     {
         [$home, $away] = $this->teams();
