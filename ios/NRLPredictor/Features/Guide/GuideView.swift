@@ -22,6 +22,7 @@ struct GuideView: View {
                 ResponsibleGamblingFooter()
             }
             .padding(16)
+            .readableContentWidth()
         }
         .nrlPage("How to use")
         .task { await methodology.load { try await APIClient.shared.get("/api/v1/methodology") } }
@@ -196,14 +197,13 @@ struct GuideView: View {
     private func weightList(title: String, signals: [Methodology.WeightedSignal]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Eyebrow(title)
-            let maxWeight = signals.map(\.weight).max() ?? 1
+            let maxWeight = max(signals.map(\.weight).max() ?? 1, 1)
             ForEach(signals) { signal in
                 HStack(spacing: 8) {
                     Text(Fmt.signalName(signal.type))
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
                         .frame(width: 140, alignment: .leading)
-                        .lineLimit(1)
                     ScoreBar(value: Double(signal.weight) / Double(maxWeight), tint: Palette.accent.opacity(0.7), height: 6)
                     Text("×\(signal.weight)")
                         .font(.numeric(11))

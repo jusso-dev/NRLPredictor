@@ -9,7 +9,7 @@ enum Route: Hashable {
 }
 
 extension View {
-    /// Applies the app's page chrome: black canvas, condensed nav title, shared routes.
+    /// Applies the app's page chrome: black canvas, condensed nav title.
     func nrlPage(_ title: String) -> some View {
         self
             .background(Palette.bg)
@@ -18,20 +18,32 @@ extension View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .navigationDestination(for: Route.self) { route in
-                switch route {
-                case .match(let id): MatchDetailView(matchId: id)
-                case .team(let id): TeamDetailView(teamId: id)
-                case .player(let id): PlayerDetailView(playerId: id)
-                case .guide: GuideView()
-                }
+    }
+
+    /// Caps page content at a readable width and centres it, so wide windows
+    /// (an unfolded iPhone Duo, landscape) don't stretch rows edge to edge.
+    func readableContentWidth() -> some View {
+        frame(maxWidth: 720, alignment: .leading)
+            .frame(maxWidth: .infinity)
+    }
+
+    /// Shared routes. Register once per stack, on its root view: a destination
+    /// declared again on a pushed page is ignored and logged by SwiftUI.
+    func routeDestinations() -> some View {
+        navigationDestination(for: Route.self) { route in
+            switch route {
+            case .match(let id): MatchDetailView(matchId: id)
+            case .team(let id): TeamDetailView(teamId: id)
+            case .player(let id): PlayerDetailView(playerId: id)
+            case .guide: GuideView()
             }
+        }
     }
 }
 
 struct RootView: View {
     @State private var selection = RootView.initialTab
-    @State private var roundPath = NavigationPath()
+    @State private var roundPath = RootView.initialRoundPath
 
     /// Debug builds honour `-startTab <n>` so a tab can be screenshotted straight from the CLI.
     static var initialTab: Int {
@@ -60,26 +72,30 @@ struct RootView: View {
         #endif
     }
 
+    private static var initialRoundPath: NavigationPath {
+        var path = NavigationPath()
+        if let route = debugRoute { path.append(route) }
+        return path
+    }
+
     var body: some View {
         TabView(selection: $selection) {
             NavigationStack(path: $roundPath) {
                 FixturesView()
-                    .task {
-                        if let route = RootView.debugRoute { roundPath.append(route) }
-                    }
+                    .routeDestinations()
             }
                 .tabItem { Label("Round", systemImage: "sportscourt") }
                 .tag(0)
 
-            NavigationStack { MultiBuilderView() }
+            NavigationStack { MultiBuilderView().routeDestinations() }
                 .tabItem { Label("Multi", systemImage: "square.stack.3d.up") }
                 .tag(1)
 
-            NavigationStack { OddsView() }
+            NavigationStack { OddsView().routeDestinations() }
                 .tabItem { Label("Odds", systemImage: "chart.line.uptrend.xyaxis") }
                 .tag(2)
 
-            NavigationStack { TeamsView() }
+            NavigationStack { TeamsView().routeDestinations() }
                 .tabItem { Label("Teams", systemImage: "person.3") }
                 .tag(3)
         }
