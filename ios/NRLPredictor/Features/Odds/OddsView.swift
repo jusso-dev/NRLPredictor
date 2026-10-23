@@ -22,6 +22,7 @@ struct OddsView: View {
                 ResponsibleGamblingFooter()
             }
             .padding(16)
+            .readableContentWidth()
         }
         .nrlPage("Odds")
         .toolbar {
@@ -73,6 +74,7 @@ struct OddsView: View {
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(Palette.muted)
                         }
+                        .accessibilityLabel("View \(entry.match ?? "match")")
                     }
                 }
 
@@ -117,7 +119,7 @@ struct OddsView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.secondary)
                     Spacer()
-                    ForEach(market.outcomes) { outcome in
+                    ForEach(Array(market.outcomes.enumerated()), id: \.offset) { _, outcome in
                         VStack(alignment: .trailing, spacing: 1) {
                             Text(Fmt.odds(outcome.decimalOdds))
                                 .font(.numeric(13, .medium))

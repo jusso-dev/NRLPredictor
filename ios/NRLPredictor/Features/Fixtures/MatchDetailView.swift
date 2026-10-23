@@ -28,6 +28,7 @@ struct MatchDetailView: View {
                 ResponsibleGamblingFooter()
             }
             .padding(16)
+            .readableContentWidth()
         }
         .nrlPage(match.value?.data?.title ?? "Match")
         .refreshable { await reload(force: true) }
@@ -101,6 +102,7 @@ struct MatchDetailView: View {
                                             .font(.system(size: 11, weight: .semibold))
                                             .foregroundStyle(Palette.muted)
                                     }
+                                    .accessibilityLabel("View player: \(change.summary)")
                                 }
                             }
                         }
@@ -164,7 +166,6 @@ struct MatchDetailView: View {
                                 .font(.system(size: 12))
                                 .foregroundStyle(Palette.muted)
                                 .frame(width: 120, alignment: .leading)
-                                .lineLimit(1)
                             ScoreBar(
                                 value: signal.strength,
                                 tint: signal.strength >= 0.6 ? Palette.accent.opacity(0.7) : Palette.faint.opacity(0.5),
@@ -176,6 +177,8 @@ struct MatchDetailView: View {
                             .foregroundStyle(Palette.faint)
                             .padding(.leading, 128)
                     }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityValue(Text(signal.strength, format: .percent.precision(.fractionLength(0))))
                 }
             }
         }
@@ -319,7 +322,6 @@ struct MatchDetailView: View {
                                         .font(.system(size: 11))
                                         .foregroundStyle(Palette.muted)
                                         .frame(width: 130, alignment: .leading)
-                                        .lineLimit(1)
                                     ScoreBar(
                                         value: signal.strength,
                                         tint: signal.strength >= 0.7 ? Palette.accent : Palette.faint.opacity(0.6),
@@ -330,6 +332,8 @@ struct MatchDetailView: View {
                                         .foregroundStyle(Palette.faint)
                                         .frame(width: 28, alignment: .trailing)
                                 }
+                                .accessibilityElement(children: .combine)
+                                .accessibilityValue(Text(signal.strength, format: .percent.precision(.fractionLength(0))))
                             }
                         }
                     }

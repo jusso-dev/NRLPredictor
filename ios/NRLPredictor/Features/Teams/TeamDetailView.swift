@@ -35,6 +35,7 @@ struct TeamDetailView: View {
                 }
             }
             .padding(16)
+            .readableContentWidth()
         }
         .nrlPage(team.value?.data?.label ?? "Team")
         .refreshable { await reload(force: true) }

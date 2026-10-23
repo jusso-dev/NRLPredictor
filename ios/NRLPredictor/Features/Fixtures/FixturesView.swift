@@ -40,6 +40,7 @@ struct FixturesView: View {
                 ResponsibleGamblingFooter()
             }
             .padding(16)
+            .readableContentWidth()
         }
         .nrlPage("Round")
         .toolbar {

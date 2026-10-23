@@ -7,6 +7,7 @@ struct MultiBuilderView: View {
     /// Legs the user has tapped off the slip — the model still returns them.
     @State private var excluded: Set<String> = []
     @State private var stake = "10"
+    @FocusState private var stakeFocused: Bool
 
     private var legs: [MultiLeg] { result.value?.legs ?? [] }
     private var includedLegs: [MultiLeg] { legs.filter { !excluded.contains($0.id) } }
@@ -52,10 +53,16 @@ struct MultiBuilderView: View {
                 ResponsibleGamblingFooter()
             }
             .padding(16)
+            .readableContentWidth()
         }
         .nrlPage("Multi")
         .toolbar {
             ToolbarItem(placement: .principal) { MastheadTitle(title: "Multi Builder") }
+            // The decimal pad has no return key; folded in landscape it covers most of the window.
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { stakeFocused = false }
+            }
         }
         .refreshable { await build() }
         .task { await result.load { try await fetch() } }
@@ -106,6 +113,7 @@ struct MultiBuilderView: View {
                             }
                     }
                     .buttonStyle(.plain)
+                    .accessibilityAddTraits(risk == profile ? .isSelected : [])
                 }
             }
 
@@ -194,6 +202,8 @@ struct MultiBuilderView: View {
                                     .foregroundStyle(Palette.muted)
                                 TextField("10", text: $stake)
                                     .keyboardType(.decimalPad)
+                                    .focused($stakeFocused)
+                                    .accessibilityLabel("Stake in dollars")
                                     .font(.numeric(16, .medium))
                                     .foregroundStyle(Palette.heading)
                                     .frame(width: 70)
@@ -304,11 +314,10 @@ struct MultiBuilderView: View {
                         HStack(spacing: 6) {
                             Chip(leg.kindLabel, tone: leg.isWinner ? .gold : .muted)
                             if leg.isValuePick { Chip("Value pick", tone: .orange) }
-                            Text(leg.match)
-                                .font(.system(size: 11))
-                                .foregroundStyle(Palette.muted)
-                                .lineLimit(1)
                         }
+                        Text(leg.match)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.muted)
 
                         Text(leg.selection)
                             .displayStyle(18)

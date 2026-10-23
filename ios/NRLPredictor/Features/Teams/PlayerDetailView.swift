@@ -21,6 +21,7 @@ struct PlayerDetailView: View {
                 }
             }
             .padding(16)
+            .readableContentWidth()
         }
         .nrlPage(player.value?.data?.name ?? "Player")
         .refreshable { await reload(force: true) }
