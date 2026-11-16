@@ -24,6 +24,8 @@ RUN npm install -g @openai/codex
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
+COPY docker/php/memory.ini /usr/local/etc/php/conf.d/zz-memory.ini
+
 WORKDIR /var/www/html
 
 COPY composer.json composer.lock ./

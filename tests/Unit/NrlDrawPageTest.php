@@ -20,6 +20,22 @@ class NrlDrawPageTest extends TestCase
         (new NrlDrawPage)->fixtures($http, 2026, 20);
     }
 
+    public function test_it_requests_the_season_by_year_not_a_date_range(): void
+    {
+        $http = Mockery::mock(HttpScraper::class);
+        $http->shouldReceive('json')
+            ->once()
+            ->with(
+                'https://site.api.espn.com/apis/site/v2/sports/rugby-league/3/scoreboard?limit=500&dates=2026',
+                ['events'],
+            )
+            ->andReturn(['events' => []]);
+
+        $this->expectException(\RuntimeException::class);
+
+        (new NrlDrawPage)->fixtures($http, 2026, 20);
+    }
+
     public function test_it_reads_match_fixtures_from_the_public_draw_payload(): void
     {
         $http = Mockery::mock(HttpScraper::class);
