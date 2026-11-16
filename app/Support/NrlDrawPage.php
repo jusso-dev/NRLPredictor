@@ -35,9 +35,10 @@ class NrlDrawPage
             throw new RuntimeException('At least one NRL round must be requested');
         }
 
+        // ESPN rejects YYYYMMDD-YYYYMMDD ranges for this league with HTTP 400
+        // ("Failed to get events endpoint"); a bare year returns the full season.
         $url = sprintf(
-            'https://site.api.espn.com/apis/site/v2/sports/rugby-league/3/scoreboard?limit=500&dates=%d0101-%d1231',
-            $season,
+            'https://site.api.espn.com/apis/site/v2/sports/rugby-league/3/scoreboard?limit=500&dates=%d',
             $season,
         );
 
