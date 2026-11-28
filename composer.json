@@ -7,7 +7,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
-        "laravel/framework": "^11.31",
+        "laravel/framework": "^12.71",
         "laravel/tinker": "^2.9",
         "livewire/livewire": "^3.0",
         "symfony/css-selector": "^7.4",
